@@ -129,7 +129,7 @@ public partial class FlyoutWindow : Window
         double dpiScale = GetDpiForWindow(_instance._hwnd) / 96.0;
         if (dpiScale <= 0) dpiScale = 1.0;
         int columnCount = Math.Max(1, _instance.ColumnsPanel.Children.Count);
-        int flyoutWidthPx = (int)(250 * columnCount * dpiScale);
+        int flyoutWidthPx = (int)(200 * columnCount * dpiScale);
         int flyoutHeightPx = (int)Math.Ceiling(_instance.MeasureContentHeight() * dpiScale);
 
         // Position off-screen first, then show
@@ -173,6 +173,14 @@ public partial class FlyoutWindow : Window
     private void HideFlyout()
     {
         ShowWindow(_hwnd, SW_HIDE);
+    }
+
+    private void ContextSettingsItem_Click(object sender, RoutedEventArgs e)
+    {
+        HideFlyout();
+        _lastDismissed = DateTime.UtcNow;
+        if (_owner != null)
+            SettingsWindow.ShowInstance(_owner);
     }
 
     private AppWindow GetAppWindow()
@@ -251,7 +259,7 @@ public partial class FlyoutWindow : Window
     {
         var lv = new ListView
         {
-            Width = 250,
+            Width = 200,
             Padding = new Thickness(8, 6, 8, 6),
             IsItemClickEnabled = true,
             SelectionMode = ListViewSelectionMode.None,
@@ -334,7 +342,7 @@ public partial class FlyoutWindow : Window
         double dpiScale = GetDpiForWindow(_hwnd) / 96.0;
         if (dpiScale <= 0) dpiScale = 1.0;
         int columnCount = Math.Max(1, ColumnsPanel.Children.Count);
-        int flyoutWidthPx = (int)(250 * columnCount * dpiScale);
+        int flyoutWidthPx = (int)(200 * columnCount * dpiScale);
         int newHeightPx = (int)Math.Ceiling(MeasureContentHeight() * dpiScale);
 
         // Keep the bottom edge anchored: adjust the top when height changes.
@@ -365,7 +373,7 @@ public partial class FlyoutWindow : Window
         var workArea = monitorInfo.rcWork;
 
         int columnCount = Math.Max(1, ColumnsPanel.Children.Count);
-        int flyoutWidth = (int)(250 * columnCount * scale);
+        int flyoutWidth = (int)(200 * columnCount * scale);
         int flyoutHeight = (int)Math.Ceiling(MeasureContentHeight() * scale);
         int gap = Math.Max(4, (int)Math.Round(8 * scale));
 

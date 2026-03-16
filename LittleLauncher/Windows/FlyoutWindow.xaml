@@ -252,6 +252,16 @@
             </DataTemplate>
         </Grid.Resources>
 
+        <Grid.ContextFlyout>
+            <MenuFlyout>
+                <MenuFlyoutItem x:Name="ContextSettingsItem" Text="Settings" Click="ContextSettingsItem_Click">
+                    <MenuFlyoutItem.Icon>
+                        <FontIcon Glyph="&#xE713;" />
+                    </MenuFlyoutItem.Icon>
+                </MenuFlyoutItem>
+            </MenuFlyout>
+        </Grid.ContextFlyout>
+
         <StackPanel x:Name="ColumnsPanel" Orientation="Horizontal" />
     </Grid>
 </Window>
