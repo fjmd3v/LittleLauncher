@@ -76,8 +76,11 @@ Release builds AOT-publish the companion exe (`LauncherShortcut`) automatically.
 | Progressive Web App | `false` | `true` | AUMID (e.g. `domain-HEX_hash!App`) | — | `explorer shell:AppsFolder\{Path}` |
 | Heading | — | — | — | — | Not launchable (visual divider, renamed from Category) |
 | Group | — | — | — | — | Not launchable (collapsible parent containing child items/headings via `Children` collection) |
+| Column Break | — | — | — | — | Not launchable (splits the flyout into a new side-by-side column; `IsColumnBreak = true`) |
 
 Groups have a `Children` (`ObservableCollection<LauncherItem>`) that holds nested items and headings. In the settings page, groups render as custom expand/collapse cards (StackPanel with `Tag="GroupRoot"` / `Tag="GroupChildren"`), not WinUI Expanders — this allows the entire group card to be a drag-and-drop source. `LauncherItem.IsExpanded` (`[XmlIgnore]`, defaults `true`) tracks the collapse state so it survives `RefreshList()` re-renders. In the flyout, the hierarchy is flattened for display. `IsHeading` is serialized as `<IsCategory>` in XML for backward compatibility.
+
+Column breaks (`IsColumnBreak = true`) are structural dividers that cause the flyout to render a new side-by-side column. They are not displayed or launchable — they only affect flyout layout. Created via `LauncherItem.CreateColumnBreak()`.
 
 PWAs are auto-detected by enumerating `shell:AppsFolder` for Chromium-registered app entries (AUMIDs matching `{domain}-{HEX}_{hash}!App`). Icons are fetched from the PWA domain via `FaviconService.FetchAndCacheAsync()`.
 - **Release a new version:** Edit `<Version>` in `Directory.Build.props`, update fallback version in `Package.wxs`, commit, tag `vX.Y.Z`, push. The MSIX manifest version is auto-stamped by `LittleLauncherMSIX/build-msix.ps1`. See `versioning.instructions.md` for the full checklist.

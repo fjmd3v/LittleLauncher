@@ -80,6 +80,10 @@ Supports both private-key (`PrivateKeyFile`) and password-based authentication.
 
 The flyout popup dismisses when focus is lost via the WinUI `Activated` event (`Deactivated` state). It uses `WS_EX_TOOLWINDOW` to stay out of Alt-Tab and `OverlappedPresenter.CreateForContextMenu()` for borderless always-on-top presentation.
 
+**Multi-column layout**: The flyout renders items into a horizontal `ColumnsPanel` (a `StackPanel`). Each `LauncherItem` with `IsColumnBreak = true` starts a new column; `RebuildColumnsPanel()` rebuilds all column `ListView` instances from scratch whenever the items change. Each column is a dynamically created `ListView` (200 px wide) sharing the same `ItemTemplateSelector` and `ItemContainerStyleSelector` resources. The window width scales with the column count: `200 × columnCount` logical pixels.
+
+**Right-click context menu**: Right-clicking empty space in the flyout shows a `ContextFlyout` with a "Settings" option that dismisses the flyout and opens `SettingsWindow`.
+
 ## Companion exe (`LauncherShortcut`)
 
 `LittleLauncherFlyout.exe` is a tiny companion binary pinned to the taskbar. Clicking it sends a `PostMessage` to the main app to show the flyout, then exits. Because it launches on every click, startup latency is critical:
