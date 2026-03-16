@@ -85,6 +85,8 @@ PWAs are auto-detected by enumerating `shell:AppsFolder` for Chromium-registered
 
 ## Documentation maintenance
 
+**Documentation updates are part of the task — a task is not done until docs are updated.**
+
 After completing any feature, bug fix, or structural change, review and update the affected documentation before considering the task done. This includes:
 
 | What changed | Update these |
@@ -102,3 +104,5 @@ After completing any feature, bug fix, or structural change, review and update t
 | Any structural change | `ARCHITECTURE.md`, `README.md` if affected |
 
 **Rule:** If an instruction file's `applyTo` pattern wouldn't match the new files you created, widen the glob or add the new path. Instruction files that don't match are never loaded.
+
+**Rule:** Read the relevant instruction file before deciding whether it needs updating — don't skip this based on assumptions.
