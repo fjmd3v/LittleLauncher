@@ -3,6 +3,7 @@
       xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
 
     <ScrollViewer VerticalScrollBarVisibility="Auto">
+    <Grid>
     <StackPanel MaxWidth="1000" Margin="16">
         <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,0,8">
             <Image x:Name="AppIcon" Width="32" Height="32" VerticalAlignment="Center" Margin="0,0,10,0" />
@@ -113,5 +114,6 @@
             </Grid>
         </Border>
     </StackPanel>
+    </Grid>
     </ScrollViewer>
 </Page>

@@ -23,6 +23,7 @@ public class LauncherItemTemplateSelector : DataTemplateSelector
     public DataTemplate? LauncherItemTemplate { get; set; }
     public DataTemplate? HeadingItemTemplate { get; set; }
     public DataTemplate? GroupItemTemplate { get; set; }
+    public DataTemplate? ColumnBreakItemTemplate { get; set; }
 
     protected override DataTemplate? SelectTemplateCore(object item)
     {
@@ -30,6 +31,8 @@ public class LauncherItemTemplateSelector : DataTemplateSelector
             return GroupItemTemplate;
         if (item is LauncherItem { IsHeading: true })
             return HeadingItemTemplate;
+        if (item is LauncherItem { IsColumnBreak: true })
+            return ColumnBreakItemTemplate;
         return LauncherItemTemplate;
     }
 }
@@ -335,6 +338,13 @@ public partial class LauncherItemsPage : Page
         await ShowGroupDialog(null);
     }
 
+    private void ShowAddColumnBreakDialog_Click(object sender, RoutedEventArgs e)
+    {
+        SettingsManager.Current.LauncherItems.Add(LauncherItem.CreateColumnBreak());
+        RefreshList();
+        SaveAndUpdateTaskbar();
+    }
+
     private async Task ShowHeadingDialog(LauncherItem? existingItem, ObservableCollection<LauncherItem>? targetList = null)
     {
         bool isEdit = existingItem != null;
@@ -413,6 +423,7 @@ public partial class LauncherItemsPage : Page
     {
         if (sender is FrameworkElement fe && fe.Tag is LauncherItem item)
         {
+            if (item.IsColumnBreak) return; // column breaks have no editable properties
             if (item.IsHeading)
                 await ShowHeadingDialog(item);
             else if (item.IsGroup)
@@ -527,8 +538,8 @@ public partial class LauncherItemsPage : Page
         if (sender is not ListView lv || lv.Tag is not LauncherItem group) return;
         if (_dragItem == null || _dragSourceCollection == null) return;
 
-        // Reject groups being dropped into other groups.
-        if (_dragItem.IsGroup)
+        // Reject groups and column breaks from being dropped into a group.
+        if (_dragItem.IsGroup || _dragItem.IsColumnBreak)
         {
             e.AcceptedOperation = global::Windows.ApplicationModel.DataTransfer.DataPackageOperation.None;
             e.Handled = true;
@@ -560,7 +571,7 @@ public partial class LauncherItemsPage : Page
     {
         ClearInsertionIndicator();
         if (sender is not ListView lv || lv.Tag is not LauncherItem group) return;
-        if (_dragItem == null || _dragSourceCollection == null || _dragItem.IsGroup) return;
+        if (_dragItem == null || _dragSourceCollection == null || _dragItem.IsGroup || _dragItem.IsColumnBreak) return;
 
         int dropIndex = GetDropIndex(lv, e);
 

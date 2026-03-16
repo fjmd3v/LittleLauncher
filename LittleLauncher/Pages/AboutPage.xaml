@@ -3,6 +3,7 @@
       xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
 
     <ScrollViewer VerticalScrollBarVisibility="Auto">
+    <Grid>
     <StackPanel MaxWidth="1000" Margin="16">
         <TextBlock Text="About" FontSize="24" FontWeight="SemiBold" Margin="0,0,0,16"/>
 
@@ -78,5 +79,6 @@
             </Grid>
         </Border>
     </StackPanel>
+    </Grid>
     </ScrollViewer>
 </Page>

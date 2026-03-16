@@ -60,7 +60,7 @@ public partial class FlyoutWindow : Window
         presenter.IsAlwaysOnTop = true;
         GetAppWindow().SetPresenter(presenter);
 
-        ItemsListControl.ItemsSource = BuildFlatDisplayList();
+        RebuildColumnsPanel();
 
         // Desktop Acrylic blurs whatever is behind the window (including other windows),
         // unlike Mica which only samples the wallpaper.
@@ -128,7 +128,8 @@ public partial class FlyoutWindow : Window
         // Calculate DPI-aware dimensions
         double dpiScale = GetDpiForWindow(_instance._hwnd) / 96.0;
         if (dpiScale <= 0) dpiScale = 1.0;
-        int flyoutWidthPx = (int)(250 * dpiScale);
+        int columnCount = Math.Max(1, _instance.ColumnsPanel.Children.Count);
+        int flyoutWidthPx = (int)(250 * columnCount * dpiScale);
         int flyoutHeightPx = (int)Math.Ceiling(_instance.MeasureContentHeight() * dpiScale);
 
         // Position off-screen first, then show
@@ -212,25 +213,70 @@ public partial class FlyoutWindow : Window
         hash.Add(item.IsHeading);
         hash.Add(item.IsGroup);
         hash.Add(item.IsPwa);
+        hash.Add(item.IsColumnBreak);
     }
 
     /// <summary>
-    /// Flattens the hierarchical items list into a single display list.
-    /// Groups are included as headers, followed by their children (unless collapsed).
+    /// Splits the hierarchical item list into per-column display lists.
+    /// Items after each <see cref="LauncherItem.IsColumnBreak"/> start a new column.
+    /// Groups are flattened (children appended) unless the group is collapsed.
     /// </summary>
-    private ObservableCollection<LauncherItem> BuildFlatDisplayList()
+    private List<ObservableCollection<LauncherItem>> BuildColumnLists()
     {
-        var flat = new ObservableCollection<LauncherItem>();
+        var columns = new List<ObservableCollection<LauncherItem>>();
+        var current = new ObservableCollection<LauncherItem>();
+        columns.Add(current);
+
         foreach (var item in SettingsManager.Current.LauncherItems)
         {
-            flat.Add(item);
+            if (item.IsColumnBreak)
+            {
+                current = new ObservableCollection<LauncherItem>();
+                columns.Add(current);
+                continue;
+            }
+
+            current.Add(item);
             if (item.IsGroup && !_collapsedGroups.Contains(item))
             {
                 foreach (var child in item.Children)
-                    flat.Add(child);
+                    current.Add(child);
             }
         }
-        return flat;
+
+        return columns;
+    }
+
+    private ListView CreateColumnListView()
+    {
+        var lv = new ListView
+        {
+            Width = 250,
+            Padding = new Thickness(8, 6, 8, 6),
+            IsItemClickEnabled = true,
+            SelectionMode = ListViewSelectionMode.None,
+            IsTabStop = false,
+            TabNavigation = Microsoft.UI.Xaml.Input.KeyboardNavigationMode.Once,
+            ItemTemplateSelector = (DataTemplateSelector)RootGrid.Resources["ItemTemplateSelector"],
+            ItemContainerStyleSelector = (StyleSelector)RootGrid.Resources["ItemContainerStyleSelector"],
+        };
+        ScrollViewer.SetVerticalScrollBarVisibility(lv, ScrollBarVisibility.Auto);
+        ScrollViewer.SetHorizontalScrollBarVisibility(lv, ScrollBarVisibility.Disabled);
+        lv.ItemClick += ItemsListControl_ItemClick;
+        lv.RightTapped += ItemsListControl_RightTapped;
+        lv.ContainerContentChanging += ItemsListControl_ContainerContentChanging;
+        return lv;
+    }
+
+    private void RebuildColumnsPanel()
+    {
+        ColumnsPanel.Children.Clear();
+        foreach (var col in BuildColumnLists())
+        {
+            var lv = CreateColumnListView();
+            lv.ItemsSource = col;
+            ColumnsPanel.Children.Add(lv);
+        }
     }
 
     private void RebuildItemsIfNeeded()
@@ -239,10 +285,7 @@ public partial class FlyoutWindow : Window
         if (currentHash != _lastItemsHash)
         {
             _lastItemsHash = currentHash;
-            // Null first to force full container recreation — reassigning the
-            // same ObservableCollection reference is a no-op in WinUI's ListView.
-            ItemsListControl.ItemsSource = null;
-            ItemsListControl.ItemsSource = BuildFlatDisplayList();
+            RebuildColumnsPanel();
         }
     }
 
@@ -262,48 +305,36 @@ public partial class FlyoutWindow : Window
 
     private void ToggleGroupCollapse(LauncherItem group)
     {
-        var list = ItemsListControl.ItemsSource as ObservableCollection<LauncherItem>;
-        if (list == null) return;
-
-        int groupIdx = list.IndexOf(group);
-        if (groupIdx < 0) return;
-
-        bool wasCollapsed = _collapsedGroups.Remove(group);
-        if (!wasCollapsed)
-        {
-            // Collapse: remove children after the group header
+        bool isExpanding = _collapsedGroups.Contains(group);
+        if (!_collapsedGroups.Remove(group))
             _collapsedGroups.Add(group);
-            int removeIdx = groupIdx + 1;
-            while (removeIdx < list.Count && list[removeIdx] != group && !SettingsManager.Current.LauncherItems.Contains(list[removeIdx]))
-                list.RemoveAt(removeIdx);
-        }
-        else
-        {
-            // Expand: insert children after the group header
-            int insertIdx = groupIdx + 1;
-            foreach (var child in group.Children)
-                list.Insert(insertIdx++, child);
-        }
+
+        // Rebuild all columns in one shot to avoid inconsistent
+        // per-item add/remove animations from WinUI 3's ListView.
+        RebuildColumnsPanel();
 
         PersistCollapsedGroups();
 
-        // Update the chevron glyph on the group header container
-        var container = ItemsListControl.ContainerFromIndex(groupIdx) as ListViewItem;
-        if (container != null)
+        if (isExpanding)
         {
-            var icon = FindDescendant<FontIcon>(container);
-            if (icon != null)
-                icon.Glyph = _collapsedGroups.Contains(group) ? "\uE76C" : "\uE70D";
+            // Defer the resize until after the XAML layout/render-tree update has been
+            // committed to DirectComposition (Low priority runs after Normal-priority
+            // rendering work). This prevents a black flash in the area the window would
+            // otherwise expose before the new items have been painted.
+            DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, ResizeFlyout);
         }
-
-        ResizeFlyout();
+        else
+        {
+            ResizeFlyout();
+        }
     }
 
     private void ResizeFlyout()
     {
         double dpiScale = GetDpiForWindow(_hwnd) / 96.0;
         if (dpiScale <= 0) dpiScale = 1.0;
-        int flyoutWidthPx = (int)(250 * dpiScale);
+        int columnCount = Math.Max(1, ColumnsPanel.Children.Count);
+        int flyoutWidthPx = (int)(250 * columnCount * dpiScale);
         int newHeightPx = (int)Math.Ceiling(MeasureContentHeight() * dpiScale);
 
         // Keep the bottom edge anchored: adjust the top when height changes.
@@ -333,7 +364,8 @@ public partial class FlyoutWindow : Window
         GetMonitorInfo(hMonitor, ref monitorInfo);
         var workArea = monitorInfo.rcWork;
 
-        int flyoutWidth = (int)(250 * scale);
+        int columnCount = Math.Max(1, ColumnsPanel.Children.Count);
+        int flyoutWidth = (int)(250 * columnCount * scale);
         int flyoutHeight = (int)Math.Ceiling(MeasureContentHeight() * scale);
         int gap = Math.Max(4, (int)Math.Round(8 * scale));
 
@@ -437,12 +469,19 @@ public partial class FlyoutWindow : Window
         var item = fe.DataContext as LauncherItem;
         if (item == null || item.IsHeading || item.IsGroup) return;
 
+        var lv = sender as ListView ?? ItemsListControl_GetAny();
         var flyout = new MenuFlyout();
         var editItem = new MenuFlyoutItem { Text = "Edit" };
         editItem.Click += (_, _) => EditItem(item);
         flyout.Items.Add(editItem);
 
-        flyout.ShowAt(ItemsListControl, e.GetPosition(ItemsListControl));
+        if (lv != null)
+            flyout.ShowAt(lv, e.GetPosition(lv));
+    }
+
+    private ListView? ItemsListControl_GetAny()
+    {
+        return ColumnsPanel.Children.OfType<ListView>().FirstOrDefault();
     }
 
     private void ItemsListControl_ContainerContentChanging(ListViewBase sender, ContainerContentChangingEventArgs args)
@@ -779,34 +818,47 @@ public partial class FlyoutWindow : Window
         const double headingHeight = 31;
         const double listPadding = 12;     // ListView Padding="8,6,8,6" → 6+6
 
-        double contentHeight = listPadding;
         var items = SettingsManager.Current.LauncherItems;
         if (items == null) return _lastMeasuredHeight;
+
+        // Compute the height of each column and take the tallest.
+        double maxColumnHeight = 0;
+        double currentColumnHeight = listPadding;
+
         foreach (var item in items)
         {
+            if (item.IsColumnBreak)
+            {
+                maxColumnHeight = Math.Max(maxColumnHeight, currentColumnHeight);
+                currentColumnHeight = listPadding;
+                continue;
+            }
+
             if (item.IsGroup)
-                contentHeight += groupHeight;
+                currentColumnHeight += groupHeight;
             else if (item.IsHeading)
-                contentHeight += headingHeight;
+                currentColumnHeight += headingHeight;
             else
-                contentHeight += itemHeight;
+                currentColumnHeight += itemHeight;
 
             if (item.IsGroup && !_collapsedGroups.Contains(item))
             {
                 foreach (var child in item.Children)
                 {
                     if (child.IsHeading)
-                        contentHeight += headingHeight;
+                        currentColumnHeight += headingHeight;
                     else
-                        contentHeight += itemHeight;
+                        currentColumnHeight += itemHeight;
                 }
             }
         }
 
+        maxColumnHeight = Math.Max(maxColumnHeight, currentColumnHeight);
+
         // Add a small buffer to cover accumulated sub-pixel font-height rounding.
         // Clamp to the available work-area height so the flyout never exceeds the screen.
         double maxContentHeight = GetWorkAreaHeightDips() - 16; // 16 = gap from taskbar edges
-        _lastMeasuredHeight = Math.Clamp(contentHeight + 2, 80, maxContentHeight);
+        _lastMeasuredHeight = Math.Clamp(maxColumnHeight + 2, 80, maxContentHeight);
         return _lastMeasuredHeight;
     }
 

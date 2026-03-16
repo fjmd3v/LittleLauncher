@@ -90,6 +90,13 @@ public partial class LauncherItem : ObservableObject
     public partial bool IsGroup { get; set; }
 
     /// <summary>
+    /// Whether this item is a column break. Column breaks split the flyout into multiple
+    /// side-by-side columns. Not launchable — purely a structural divider.
+    /// </summary>
+    [ObservableProperty]
+    public partial bool IsColumnBreak { get; set; }
+
+    /// <summary>
     /// Whether this group is currently expanded in the settings UI.
     /// Not serialized — purely transient UI state.
     /// </summary>
@@ -115,6 +122,7 @@ public partial class LauncherItem : ObservableObject
         IsPwa = false;
         IsHeading = false;
         IsGroup = false;
+        IsColumnBreak = false;
     }
 
     public LauncherItem(string name, string path, string iconGlyph, bool isWebsite = false, string arguments = "", string iconPath = "", bool openInAppWindow = false)
@@ -131,6 +139,7 @@ public partial class LauncherItem : ObservableObject
         IsPwa = false;
         IsHeading = false;
         IsGroup = false;
+        IsColumnBreak = false;
     }
 
     /// <summary>
@@ -150,6 +159,11 @@ public partial class LauncherItem : ObservableObject
         Name = name,
         IsGroup = true
     };
+
+    /// <summary>
+    /// Creates a column-break item. Column breaks split the flyout into side-by-side columns.
+    /// </summary>
+    public static LauncherItem CreateColumnBreak() => new() { IsColumnBreak = true };
 
     /// <summary>
     /// Normalizes legacy glyph text names (e.g. "Globe24") to Unicode characters.
