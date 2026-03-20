@@ -90,9 +90,6 @@ public partial class UserSettings : ObservableObject
     /// <summary>Application / website shortcuts shown in the taskbar widget.</summary>
     public ObservableCollection<LauncherItem> LauncherItems { get; set; }
 
-    /// <summary>Names of flyout groups the user has collapsed. Empty = all expanded.</summary>
-    public List<string> CollapsedFlyoutGroups { get; set; }
-
     // ── SFTP Sync ───────────────────────────────────────────────────
 
     /// <summary>SSH/SFTP hostname or IP address.</summary>
@@ -142,7 +139,6 @@ public partial class UserSettings : ObservableObject
         // Do NOT populate defaults here — XmlSerializer calls this constructor
         // then appends deserialized items, which would double the list.
         LauncherItems = [];
-        CollapsedFlyoutGroups = [];
 
         SftpHost = "";
         SftpPort = 22;

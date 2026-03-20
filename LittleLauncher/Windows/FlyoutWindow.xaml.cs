@@ -35,23 +35,12 @@ public partial class FlyoutWindow : Window
     private IntPtr _hwnd;
     private SUBCLASSPROC? _wndProcDelegate;
     private bool _isShowing;
-    private readonly HashSet<LauncherItem> _collapsedGroups = [];
 
     private FlyoutWindow(MainWindow owner)
     {
         _owner = owner;
         InitializeComponent();
         _hwnd = WindowNative.GetWindowHandle(this);
-
-        // Restore persisted collapsed-groups state
-        var savedNames = SettingsManager.Current.CollapsedFlyoutGroups;
-        if (savedNames.Count > 0)
-        {
-            var nameSet = new HashSet<string>(savedNames, StringComparer.OrdinalIgnoreCase);
-            foreach (var item in SettingsManager.Current.LauncherItems)
-                if (item.IsGroup && nameSet.Contains(item.Name))
-                    _collapsedGroups.Add(item);
-        }
 
         // Remove titlebar and make borderless, always on top so it
         // renders above the tray overflow popup.
@@ -175,14 +164,6 @@ public partial class FlyoutWindow : Window
         ShowWindow(_hwnd, SW_HIDE);
     }
 
-    private void ContextSettingsItem_Click(object sender, RoutedEventArgs e)
-    {
-        HideFlyout();
-        _lastDismissed = DateTime.UtcNow;
-        if (_owner != null)
-            SettingsWindow.ShowInstance(_owner);
-    }
-
     private AppWindow GetAppWindow()
     {
         var wndId = Microsoft.UI.Win32Interop.GetWindowIdFromWindow(_hwnd);
@@ -245,7 +226,7 @@ public partial class FlyoutWindow : Window
             }
 
             current.Add(item);
-            if (item.IsGroup && !_collapsedGroups.Contains(item))
+            if (item.IsGroup)
             {
                 foreach (var child in item.Children)
                     current.Add(child);
@@ -272,7 +253,6 @@ public partial class FlyoutWindow : Window
         ScrollViewer.SetHorizontalScrollBarVisibility(lv, ScrollBarVisibility.Disabled);
         lv.ItemClick += ItemsListControl_ItemClick;
         lv.RightTapped += ItemsListControl_RightTapped;
-        lv.ContainerContentChanging += ItemsListControl_ContainerContentChanging;
         return lv;
     }
 
@@ -305,54 +285,9 @@ public partial class FlyoutWindow : Window
     {
         if (_instance != null)
         {
-            _instance.SyncCollapsedGroupsFromModel();
             _instance._lastItemsHash = -1;
             _instance.RebuildItemsIfNeeded();
         }
-    }
-
-    private void ToggleGroupCollapse(LauncherItem group)
-    {
-        bool isExpanding = _collapsedGroups.Contains(group);
-        if (!_collapsedGroups.Remove(group))
-            _collapsedGroups.Add(group);
-
-        // Rebuild all columns in one shot to avoid inconsistent
-        // per-item add/remove animations from WinUI 3's ListView.
-        RebuildColumnsPanel();
-
-        PersistCollapsedGroups();
-
-        if (isExpanding)
-        {
-            // Defer the resize until after the XAML layout/render-tree update has been
-            // committed to DirectComposition (Low priority runs after Normal-priority
-            // rendering work). This prevents a black flash in the area the window would
-            // otherwise expose before the new items have been painted.
-            DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, ResizeFlyout);
-        }
-        else
-        {
-            ResizeFlyout();
-        }
-    }
-
-    private void ResizeFlyout()
-    {
-        double dpiScale = GetDpiForWindow(_hwnd) / 96.0;
-        if (dpiScale <= 0) dpiScale = 1.0;
-        int columnCount = Math.Max(1, ColumnsPanel.Children.Count);
-        int flyoutWidthPx = (int)(200 * columnCount * dpiScale);
-        int newHeightPx = (int)Math.Ceiling(MeasureContentHeight() * dpiScale);
-
-        // Keep the bottom edge anchored: adjust the top when height changes.
-        GetWindowRect(_hwnd, out RECT rc);
-        int bottom = rc.Bottom;
-        int left = rc.Left;
-        int top = bottom - newHeightPx;
-
-        SetWindowPos(_hwnd, 0, left, top, flyoutWidthPx, newHeightPx,
-            SWP_NOZORDER | SWP_NOACTIVATE);
     }
 
 
@@ -419,13 +354,7 @@ public partial class FlyoutWindow : Window
     {
         if (e.ClickedItem is not LauncherItem item) return;
 
-        if (item.IsGroup)
-        {
-            ToggleGroupCollapse(item);
-            return;
-        }
-
-        if (item.IsHeading) return;
+        if (item.IsGroup || item.IsHeading) return;
 
         HideFlyout();
         _lastDismissed = DateTime.UtcNow;
@@ -490,32 +419,6 @@ public partial class FlyoutWindow : Window
     private ListView? ItemsListControl_GetAny()
     {
         return ColumnsPanel.Children.OfType<ListView>().FirstOrDefault();
-    }
-
-    private void ItemsListControl_ContainerContentChanging(ListViewBase sender, ContainerContentChangingEventArgs args)
-    {
-        if (args.Item is not LauncherItem { IsGroup: true } group) return;
-        args.RegisterUpdateCallback((_, a) =>
-        {
-            var icon = FindDescendant<FontIcon>(a.ItemContainer);
-            if (icon != null)
-                icon.Glyph = _collapsedGroups.Contains(group) ? "\uE76C" : "\uE70D";
-        });
-    }
-
-
-
-    private static T? FindDescendant<T>(DependencyObject parent) where T : DependencyObject
-    {
-        int count = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetChildrenCount(parent);
-        for (int i = 0; i < count; i++)
-        {
-            var child = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetChild(parent, i);
-            if (child is T match) return match;
-            var desc = FindDescendant<T>(child);
-            if (desc != null) return desc;
-        }
-        return null;
     }
 
     private static void LaunchWebsite(LauncherItem item)
@@ -808,6 +711,14 @@ public partial class FlyoutWindow : Window
             SettingsWindow.NavigateToEditItem(item, _owner);
     }
 
+    private void ContextSettingsItem_Click(object sender, RoutedEventArgs e)
+    {
+        HideFlyout();
+        _lastDismissed = DateTime.UtcNow;
+        if (_owner != null)
+            SettingsWindow.ShowInstance(_owner);
+    }
+
     private double _lastMeasuredHeight = 80;
 
     private double MeasureContentHeight()
@@ -849,7 +760,7 @@ public partial class FlyoutWindow : Window
             else
                 currentColumnHeight += itemHeight;
 
-            if (item.IsGroup && !_collapsedGroups.Contains(item))
+            if (item.IsGroup)
             {
                 foreach (var child in item.Children)
                 {
@@ -886,21 +797,4 @@ public partial class FlyoutWindow : Window
         return workAreaHeightPx / scale;
     }
 
-    private void PersistCollapsedGroups()
-    {
-        var names = _collapsedGroups.Select(g => g.Name).ToList();
-        SettingsManager.Current.CollapsedFlyoutGroups = names;
-        SettingsManager.SaveSettings();
-    }
-
-    private void SyncCollapsedGroupsFromModel()
-    {
-        _collapsedGroups.Clear();
-        var savedNames = SettingsManager.Current.CollapsedFlyoutGroups;
-        if (savedNames.Count == 0) return;
-        var nameSet = new HashSet<string>(savedNames, StringComparer.OrdinalIgnoreCase);
-        foreach (var item in SettingsManager.Current.LauncherItems)
-            if (item.IsGroup && nameSet.Contains(item.Name))
-                _collapsedGroups.Add(item);
-    }
 }
