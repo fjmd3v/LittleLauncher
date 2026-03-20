@@ -21,9 +21,9 @@ Little Launcher is a .NET 10 WinUI 3 desktop application (unpackaged) that provi
 | `LittleLauncher` | App, MainWindow, SettingsWindow |
 | `LittleLauncher.Classes` | NativeMethods, ThemeManager |
 | `LittleLauncher.Classes.Settings` | SettingsManager |
-| `LittleLauncher.Models` | LauncherItem, SshConnectionProfile |
+| `LittleLauncher.Models` | LauncherItem, SshConnectionProfile, SharedGroupSource |
 | `LittleLauncher.Pages` | All settings pages |
-| `LittleLauncher.Services` | SftpSyncService, FaviconService, UpdateService |
+| `LittleLauncher.Services` | SftpSyncService, SharedGroupSyncService, FaviconService, UpdateService |
 | `LittleLauncher.ViewModels` | UserSettings |
 | `LittleLauncher.Windows` | FlyoutWindow |
 
@@ -79,6 +79,12 @@ Release builds AOT-publish the companion exe (`LauncherShortcut`) automatically.
 | Column Break | — | — | — | — | Not launchable (splits the flyout into a new side-by-side column; `IsColumnBreak = true`) |
 
 Groups have a `Children` (`ObservableCollection<LauncherItem>`) that holds nested items and headings. In the settings page, groups render as custom expand/collapse cards (StackPanel with `Tag="GroupRoot"` / `Tag="GroupChildren"`), not WinUI Expanders — this allows the entire group card to be a drag-and-drop source. `LauncherItem.IsExpanded` (`[XmlIgnore]`, defaults `true`) tracks the collapse state so it survives `RefreshList()` re-renders. In the flyout, the hierarchy is flattened for display. `IsHeading` is serialized as `<IsCategory>` in XML for backward compatibility.
+
+A group becomes a **shared group** when `LauncherItem.SharedGroupId` is set to a non-empty GUID matching a `SharedGroupSource` in `UserSettings.SharedGroupSources`. Shared groups have two roles:
+- **Owner** (`SharedGroupSource.IsOwner = true`): the group is editable; children are serialized to an XML file (local or SFTP) whenever synced. Displayed with an accent-border and "Shared" badge in the settings UI.
+- **Subscriber** (`SharedGroupSource.IsOwner = false`): the group's children are replaced when synced from the shared file. Children are read-only — no drag, no edit/move/remove. Displayed with a "Subscribed" badge.
+
+Removing a shared group also removes its `SharedGroupSource` from settings. Stopping sharing (owner) via the Edit dialog clears `SharedGroupId` and removes the `SharedGroupSource` but leaves the group intact.
 
 Column breaks (`IsColumnBreak = true`) are structural dividers that cause the flyout to render a new side-by-side column. They are not displayed or launchable — they only affect flyout layout. Created via `LauncherItem.CreateColumnBreak()`.
 

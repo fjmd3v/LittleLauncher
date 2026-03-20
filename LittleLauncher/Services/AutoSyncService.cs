@@ -1,4 +1,5 @@
 using LittleLauncher.Classes.Settings;
+using LittleLauncher.Models;
 
 namespace LittleLauncher.Services;
 
@@ -78,28 +79,47 @@ public static class AutoSyncService
     }
 
     /// <summary>
-    /// Run the startup sync: download launcher items from the server.
+    /// Run the startup sync: download launcher items from the server, and sync all shared groups.
     /// </summary>
     public static async Task SyncOnStartupAsync()
     {
-        if (!SettingsManager.Current.SftpAutoSync
-            || string.IsNullOrWhiteSpace(SettingsManager.Current.SftpHost))
-            return;
-
-        try
+        // Main SFTP sync (if configured)
+        if (SettingsManager.Current.SftpAutoSync
+            && !string.IsNullOrWhiteSpace(SettingsManager.Current.SftpHost))
         {
-            var (success, message) = await SftpSyncService.DownloadLauncherItemsAsync();
-            if (success)
+            try
             {
-                Logger.Info("Auto-sync startup: downloaded launcher items");
-                Windows.FlyoutWindow.InvalidateItems();
+                var (success, message) = await SftpSyncService.DownloadLauncherItemsAsync();
+                if (success)
+                {
+                    Logger.Info("Auto-sync startup: downloaded launcher items");
+                    Windows.FlyoutWindow.InvalidateItems();
+                }
+                else
+                    Logger.Warn($"Auto-sync startup skipped: {message}");
             }
-            else
-                Logger.Warn($"Auto-sync startup skipped: {message}");
+            catch (Exception ex)
+            {
+                Logger.Error(ex, "Auto-sync startup failed");
+            }
         }
-        catch (Exception ex)
+
+        // Shared group sync (always runs if there are any shared groups)
+        var sources = SettingsManager.Current.SharedGroupSources;
+        if (sources.Count > 0)
         {
-            Logger.Error(ex, "Auto-sync startup failed");
+            try
+            {
+                // Download subscribed groups first, then push owned groups
+                await SharedGroupSyncService.SyncAllIncomingAsync();
+                await SharedGroupSyncService.SyncAllOutgoingAsync();
+                if (sources.Any(s => !s.IsOwner))
+                    Windows.FlyoutWindow.InvalidateItems();
+            }
+            catch (Exception ex)
+            {
+                Logger.Error(ex, "Shared group startup sync failed");
+            }
         }
     }
 
@@ -143,6 +163,27 @@ public static class AutoSyncService
         catch (Exception ex)
         {
             Logger.Warn(ex, $"Auto-sync ({trigger}) failed");
+        }
+
+        // Also sync incoming shared groups on the periodic timer
+        await SyncSharedGroupsSilentAsync(trigger);
+    }
+
+    private static async Task SyncSharedGroupsSilentAsync(string trigger)
+    {
+        var sources = SettingsManager.Current.SharedGroupSources;
+        if (sources.Count == 0) return;
+
+        try
+        {
+            bool hadIncoming = sources.Any(s => !s.IsOwner);
+            await SharedGroupSyncService.SyncAllIncomingAsync();
+            if (hadIncoming)
+                Windows.FlyoutWindow.InvalidateItems();
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn(ex, $"Shared group sync ({trigger}) failed");
         }
     }
 }

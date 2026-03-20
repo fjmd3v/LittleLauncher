@@ -17,22 +17,45 @@ namespace LittleLauncher.Pages;
 
 /// <summary>
 /// Selects the correct DataTemplate based on item type: group, heading, or launchable item.
+/// Shared groups are routed to the owner or subscriber template based on UserSettings.
 /// </summary>
 public class LauncherItemTemplateSelector : DataTemplateSelector
 {
     public DataTemplate? LauncherItemTemplate { get; set; }
-    public DataTemplate? HeadingItemTemplate { get; set; }
     public DataTemplate? GroupItemTemplate { get; set; }
     public DataTemplate? ColumnBreakItemTemplate { get; set; }
+    public DataTemplate? SharedGroupOwnerTemplate { get; set; }
+    public DataTemplate? SharedGroupSubscriberTemplate { get; set; }
 
     protected override DataTemplate? SelectTemplateCore(object item)
     {
-        if (item is LauncherItem { IsGroup: true })
-            return GroupItemTemplate;
-        if (item is LauncherItem { IsHeading: true })
-            return HeadingItemTemplate;
-        if (item is LauncherItem { IsColumnBreak: true })
-            return ColumnBreakItemTemplate;
+        if (item is LauncherItem li)
+        {
+            if (li.IsGroup)
+            {
+                if (!string.IsNullOrEmpty(li.SharedGroupId))
+                {
+                    bool isOwner = SettingsManager.Current.SharedGroupSources
+                        .Any(s => s.Id == li.SharedGroupId && s.IsOwner);
+                    return isOwner ? SharedGroupOwnerTemplate : SharedGroupSubscriberTemplate;
+                }
+                return GroupItemTemplate;
+            }
+            if (li.IsColumnBreak) return ColumnBreakItemTemplate;
+        }
+        return LauncherItemTemplate;
+    }
+}
+
+/// <summary>
+/// Selects read-only item templates for children inside subscribed (read-only) shared groups.
+/// </summary>
+public class ReadOnlyItemTemplateSelector : DataTemplateSelector
+{
+    public DataTemplate? LauncherItemTemplate { get; set; }
+
+    protected override DataTemplate? SelectTemplateCore(object item)
+    {
         return LauncherItemTemplate;
     }
 }
@@ -49,6 +72,17 @@ public partial class LauncherItemsPage : Page
     private ObservableCollection<LauncherItem>? _dragSourceCollection;
     private ListViewItem? _lastIndicatorContainer;
 
+    // -- Cached resources (created once, reused on every pointer/drag event) --
+    private static readonly Microsoft.UI.Input.InputSystemCursor _sizeAllCursor =
+        Microsoft.UI.Input.InputSystemCursor.Create(Microsoft.UI.Input.InputSystemCursorShape.SizeAll);
+    private static readonly Microsoft.UI.Input.InputSystemCursor _arrowCursor =
+        Microsoft.UI.Input.InputSystemCursor.Create(Microsoft.UI.Input.InputSystemCursorShape.Arrow);
+    private Microsoft.UI.Xaml.Media.Brush? _accentBrushCache;
+    private Microsoft.UI.Xaml.Media.Brush AccentBrush =>
+        _accentBrushCache ??= Application.Current.Resources.TryGetValue("AccentFillColorDefaultBrush", out var b)
+            ? (Microsoft.UI.Xaml.Media.Brush)b
+            : new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.DodgerBlue);
+
     public LauncherItemsPage()
     {
         InitializeComponent();
@@ -61,9 +95,7 @@ public partial class LauncherItemsPage : Page
         if (PendingEditItem is { } item)
         {
             PendingEditItem = null;
-            if (item.IsHeading)
-                await ShowHeadingDialog(item);
-            else if (item.IsGroup)
+            if (item.IsGroup)
                 await ShowGroupDialog(item);
             else
                 await ShowItemDialog(item);
@@ -146,7 +178,6 @@ public partial class LauncherItemsPage : Page
         _dragItem = null;
         _dragSourceCollection = null;
 
-        RefreshList();
         SaveAndUpdateTaskbar();
         e.Handled = true;
     }
@@ -192,25 +223,25 @@ public partial class LauncherItemsPage : Page
     {
         if (sender is Border border && FindGripIcon(border) is FontIcon grip)
             grip.Opacity = 0.8;
-        this.ProtectedCursor = Microsoft.UI.Input.InputSystemCursor.Create(Microsoft.UI.Input.InputSystemCursorShape.SizeAll);
+        this.ProtectedCursor = _sizeAllCursor;
     }
 
     private void ItemCard_PointerExited(object sender, Microsoft.UI.Xaml.Input.PointerRoutedEventArgs e)
     {
         if (sender is Border border && FindGripIcon(border) is FontIcon grip)
             grip.Opacity = 0.3;
-        this.ProtectedCursor = Microsoft.UI.Input.InputSystemCursor.Create(Microsoft.UI.Input.InputSystemCursorShape.Arrow);
+        this.ProtectedCursor = _arrowCursor;
     }
 
     private void ItemButtons_PointerEntered(object sender, Microsoft.UI.Xaml.Input.PointerRoutedEventArgs e)
     {
-        this.ProtectedCursor = Microsoft.UI.Input.InputSystemCursor.Create(Microsoft.UI.Input.InputSystemCursorShape.Arrow);
+        this.ProtectedCursor = _arrowCursor;
         e.Handled = true;
     }
 
     private void ItemButtons_PointerExited(object sender, Microsoft.UI.Xaml.Input.PointerRoutedEventArgs e)
     {
-        this.ProtectedCursor = Microsoft.UI.Input.InputSystemCursor.Create(Microsoft.UI.Input.InputSystemCursorShape.SizeAll);
+        this.ProtectedCursor = _sizeAllCursor;
         e.Handled = true;
     }
 
@@ -293,7 +324,6 @@ public partial class LauncherItemsPage : Page
             {
                 currentParent.Remove(item);
                 items.Add(item);
-                RefreshList();
                 SaveAndUpdateTaskbar();
             };
             flyout.Items.Add(topLevelOption);
@@ -313,7 +343,6 @@ public partial class LauncherItemsPage : Page
             {
                 (currentParent ?? items).Remove(item);
                 targetGroup.Children.Add(item);
-                RefreshList();
                 SaveAndUpdateTaskbar();
             };
             flyout.Items.Add(groupOption);
@@ -328,11 +357,6 @@ public partial class LauncherItemsPage : Page
         await ShowItemDialog(null);
     }
 
-    private async void ShowAddHeadingDialog_Click(object sender, RoutedEventArgs e)
-    {
-        await ShowHeadingDialog(null);
-    }
-
     private async void ShowAddGroupDialog_Click(object sender, RoutedEventArgs e)
     {
         await ShowGroupDialog(null);
@@ -341,81 +365,6 @@ public partial class LauncherItemsPage : Page
     private void ShowAddColumnBreakDialog_Click(object sender, RoutedEventArgs e)
     {
         SettingsManager.Current.LauncherItems.Add(LauncherItem.CreateColumnBreak());
-        RefreshList();
-        SaveAndUpdateTaskbar();
-    }
-
-    private async Task ShowHeadingDialog(LauncherItem? existingItem, ObservableCollection<LauncherItem>? targetList = null)
-    {
-        bool isEdit = existingItem != null;
-
-        var nameBox = new TextBox
-        {
-            PlaceholderText = "Heading name",
-            Margin = new Thickness(0, 0, 0, 8)
-        };
-
-        if (isEdit)
-            nameBox.Text = existingItem!.Name;
-
-        var validationHint = new TextBlock
-        {
-            Foreground = new Microsoft.UI.Xaml.Media.SolidColorBrush(
-                global::Windows.UI.Color.FromArgb(255, 255, 69, 0)),
-            FontSize = 12,
-            TextWrapping = TextWrapping.Wrap,
-            Margin = new Thickness(0, 8, 0, 0)
-        };
-
-        var form = new StackPanel { MinWidth = 400 };
-        form.Children.Add(Label("Name"));
-        form.Children.Add(nameBox);
-        form.Children.Add(validationHint);
-
-        var dialog = new ContentDialog
-        {
-            XamlRoot = this.XamlRoot,
-            Title = isEdit ? "Edit Heading" : "Add Heading",
-            Content = form,
-            PrimaryButtonText = isEdit ? "Save" : "Add",
-            CloseButtonText = "Cancel",
-            DefaultButton = ContentDialogButton.Primary
-        };
-
-        void ValidateForm()
-        {
-            if (string.IsNullOrWhiteSpace(nameBox.Text))
-            {
-                validationHint.Text = "Name is required.";
-                validationHint.Visibility = Visibility.Visible;
-                dialog.IsPrimaryButtonEnabled = false;
-            }
-            else
-            {
-                validationHint.Visibility = Visibility.Collapsed;
-                dialog.IsPrimaryButtonEnabled = true;
-            }
-        }
-
-        nameBox.TextChanged += (s, ev) => ValidateForm();
-        ValidateForm();
-
-        var result = await dialog.ShowAsync();
-        if (result != ContentDialogResult.Primary) return;
-
-        var name = nameBox.Text.Trim();
-
-        if (isEdit)
-        {
-            existingItem!.Name = name;
-        }
-        else
-        {
-            var target = targetList ?? SettingsManager.Current.LauncherItems;
-            target.Add(LauncherItem.CreateHeading(name));
-        }
-
-        RefreshList();
         SaveAndUpdateTaskbar();
     }
 
@@ -424,9 +373,7 @@ public partial class LauncherItemsPage : Page
         if (sender is FrameworkElement fe && fe.Tag is LauncherItem item)
         {
             if (item.IsColumnBreak) return; // column breaks have no editable properties
-            if (item.IsHeading)
-                await ShowHeadingDialog(item);
-            else if (item.IsGroup)
+            if (item.IsGroup)
                 await ShowGroupDialog(item);
             else
                 await ShowItemDialog(item);
@@ -436,6 +383,14 @@ public partial class LauncherItemsPage : Page
     private async Task ShowGroupDialog(LauncherItem? existingItem)
     {
         bool isEdit = existingItem != null;
+
+        // Check if this is an owned shared group
+        SharedGroupSource? sharedSource = null;
+        if (isEdit && !string.IsNullOrEmpty(existingItem!.SharedGroupId))
+        {
+            sharedSource = SettingsManager.Current.SharedGroupSources
+                .FirstOrDefault(s => s.Id == existingItem.SharedGroupId && s.IsOwner);
+        }
 
         var nameBox = new TextBox
         {
@@ -460,12 +415,47 @@ public partial class LauncherItemsPage : Page
         form.Children.Add(nameBox);
         form.Children.Add(validationHint);
 
+        // Sharing info section for owned shared groups
+        if (sharedSource != null)
+        {
+            var separator = new Border
+            {
+                Height = 1,
+                Background = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["DividerStrokeColorDefaultBrush"],
+                Margin = new Thickness(0, 12, 0, 12)
+            };
+            form.Children.Add(separator);
+
+            form.Children.Add(new TextBlock
+            {
+                Text = "Sharing",
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                FontSize = 14,
+                Margin = new Thickness(0, 0, 0, 6)
+            });
+            form.Children.Add(new TextBlock
+            {
+                Text = "This group is being shared to:",
+                FontSize = 13,
+                Opacity = 0.7,
+                Margin = new Thickness(0, 0, 0, 4)
+            });
+            form.Children.Add(new TextBlock
+            {
+                Text = sharedSource.GetLocationDescription(),
+                FontSize = 13,
+                TextWrapping = TextWrapping.Wrap,
+                Margin = new Thickness(0, 0, 0, 0)
+            });
+        }
+
         var dialog = new ContentDialog
         {
             XamlRoot = this.XamlRoot,
             Title = isEdit ? "Edit Group" : "Add Group",
             Content = form,
             PrimaryButtonText = isEdit ? "Save" : "Add",
+            SecondaryButtonText = sharedSource != null ? "Stop Sharing" : "",
             CloseButtonText = "Cancel",
             DefaultButton = ContentDialogButton.Primary
         };
@@ -489,6 +479,17 @@ public partial class LauncherItemsPage : Page
         ValidateForm();
 
         var result = await dialog.ShowAsync();
+
+        if (result == ContentDialogResult.Secondary && sharedSource != null)
+        {
+            // Stop sharing: unlink the group and remove the source
+            existingItem!.SharedGroupId = string.Empty;
+            SettingsManager.Current.SharedGroupSources.Remove(sharedSource);
+            RefreshList();
+            SaveAndUpdateTaskbar();
+            return;
+        }
+
         if (result != ContentDialogResult.Primary) return;
 
         var name = nameBox.Text.Trim();
@@ -502,7 +503,6 @@ public partial class LauncherItemsPage : Page
             SettingsManager.Current.LauncherItems.Add(LauncherItem.CreateGroup(name));
         }
 
-        RefreshList();
         SaveAndUpdateTaskbar();
     }
 
@@ -510,12 +510,6 @@ public partial class LauncherItemsPage : Page
     {
         if (sender is FrameworkElement fe && fe.Tag is LauncherItem group)
             await ShowItemDialog(null, group.Children);
-    }
-
-    private async void ShowAddHeadingToGroup_Click(object sender, RoutedEventArgs e)
-    {
-        if (sender is FrameworkElement fe && fe.Tag is LauncherItem group)
-            await ShowHeadingDialog(null, group.Children);
     }
 
     private void GroupChildList_DragItemsStarting(object sender, DragItemsStartingEventArgs e)
@@ -587,7 +581,6 @@ public partial class LauncherItemsPage : Page
         _dragSourceCollection = null;
         TopLevelDropZone.Visibility = Visibility.Collapsed;
 
-        RefreshList();
         SaveAndUpdateTaskbar();
         e.Handled = true;
     }
@@ -629,7 +622,6 @@ public partial class LauncherItemsPage : Page
         _dragSourceCollection = null;
         TopLevelDropZone.Visibility = Visibility.Collapsed;
 
-        RefreshList();
         SaveAndUpdateTaskbar();
         e.Handled = true;
     }
@@ -647,22 +639,10 @@ public partial class LauncherItemsPage : Page
         if (listView.ContainerFromIndex(targetIndex) is ListViewItem container)
         {
             _lastIndicatorContainer = container;
-            var accentBrush = Application.Current.Resources.TryGetValue("AccentFillColorDefaultBrush", out var brush)
-                ? (Microsoft.UI.Xaml.Media.Brush)brush
-                : new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.DodgerBlue);
-
-            if (dropIndex < listView.Items.Count)
-            {
-                // Show line above this item
-                container.BorderBrush = accentBrush;
-                container.BorderThickness = new Thickness(0, 3, 0, 0);
-            }
-            else
-            {
-                // Show line below the last item
-                container.BorderBrush = accentBrush;
-                container.BorderThickness = new Thickness(0, 0, 0, 3);
-            }
+            container.BorderBrush = AccentBrush;
+            container.BorderThickness = dropIndex < listView.Items.Count
+                ? new Thickness(0, 3, 0, 0)   // line above
+                : new Thickness(0, 0, 0, 3);  // line below last item
         }
     }
 
@@ -1391,7 +1371,6 @@ public partial class LauncherItemsPage : Page
             target.Add(newItem);
         }
 
-        RefreshList();
         SaveAndUpdateTaskbar();
     }
 
@@ -1697,13 +1676,21 @@ public partial class LauncherItemsPage : Page
     {
         if (sender is FrameworkElement fe && fe.Tag is LauncherItem item)
         {
+            // If this is a shared group, remove its source config from settings
+            if (item.IsGroup && !string.IsNullOrEmpty(item.SharedGroupId))
+            {
+                var toRemove = SettingsManager.Current.SharedGroupSources
+                    .FirstOrDefault(s => s.Id == item.SharedGroupId);
+                if (toRemove != null)
+                    SettingsManager.Current.SharedGroupSources.Remove(toRemove);
+            }
+
             var items = SettingsManager.Current.LauncherItems;
             if (!items.Remove(item))
             {
                 foreach (var group in items.Where(i => i.IsGroup))
                     if (group.Children.Remove(item)) break;
             }
-            RefreshList();
             SaveAndUpdateTaskbar();
         }
     }
@@ -1725,7 +1712,6 @@ public partial class LauncherItemsPage : Page
         int index = parent.IndexOf(item);
         if (index <= 0) return;
         parent.Move(index, index - 1);
-        RefreshList();
         SaveAndUpdateTaskbar();
     }
 
@@ -1737,7 +1723,6 @@ public partial class LauncherItemsPage : Page
         int index = parent.IndexOf(item);
         if (index < 0 || index >= parent.Count - 1) return;
         parent.Move(index, index + 1);
-        RefreshList();
         SaveAndUpdateTaskbar();
     }
 
@@ -1992,6 +1977,538 @@ public partial class LauncherItemsPage : Page
         FlyoutWindow.InvalidateItems();
     }
 
+    // ── Shared group handlers ────────────────────────────────────────────────
+
+    /// <summary>
+    /// Opens the "Share this group" dialog for a regular (unshared) group, allowing the
+    /// owner to pick a local path or SFTP destination.
+    /// </summary>
+    private async void ShareGroupSetup_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement fe || fe.Tag is not LauncherItem group) return;
+        await ShowShareGroupDialog(group);
+    }
+
+    /// <summary>
+    /// Manually syncs a shared group — outgoing if owner, incoming if subscriber.
+    /// Prompts for an SFTP password if no key is available.
+    /// </summary>
+    private async void SyncSharedGroup_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button syncBtn || syncBtn.Tag is not LauncherItem group) return;
+
+        var source = SettingsManager.Current.SharedGroupSources
+            .FirstOrDefault(s => s.Id == group.SharedGroupId);
+        if (source == null) return;
+
+        string? password = null;
+        if (source.SourceType == SharedGroupSourceType.Sftp && !SharedGroupSyncService.HasAutoKey(source))
+            password = await PromptForSftpPasswordAsync($"Enter SSH password for {source.SftpHost}");
+
+        // Swap button content to a spinner for the duration of the sync
+        var originalContent = syncBtn.Content;
+        syncBtn.IsEnabled = false;
+        syncBtn.Content = new ProgressRing { IsActive = true, Width = 14, Height = 14 };
+
+        (bool success, string message) result;
+        try
+        {
+            if (source.IsOwner)
+            {
+                result = await SharedGroupSyncService.SyncOutgoingAsync(source, group, password);
+            }
+            else
+            {
+                result = await SharedGroupSyncService.SyncIncomingAsync(source, password);
+                if (result.success)
+                {
+                    RefreshList();
+                    SettingsManager.SaveSettings();
+                    FlyoutWindow.InvalidateItems();
+                }
+            }
+        }
+        finally
+        {
+            syncBtn.Content = originalContent;
+            syncBtn.IsEnabled = true;
+        }
+
+        if (!result.success)
+        {
+            await new ContentDialog
+            {
+                XamlRoot = this.XamlRoot,
+                Title = "Sync Failed",
+                Content = result.message,
+                CloseButtonText = "OK"
+            }.ShowAsync();
+        }
+    }
+
+    /// <summary>
+    /// Opens the "Add Shared Group" dialog so the user can subscribe to a group shared
+    /// by another user via a local file path or SFTP connection.
+    /// </summary>
+    private async void ShowAddSharedGroupDialog_Click(object sender, RoutedEventArgs e)
+    {
+        await ShowAddSharedGroupDialog();
+    }
+
+    // ── Share setup dialog ───────────────────────────────────────────────────
+
+    private async Task ShowShareGroupDialog(LauncherItem group)
+    {
+        var source = new SharedGroupSource { IsOwner = true };
+
+        var (form, getSource, getPassword, validateFunc) = BuildSharedGroupSourceForm(source, isSetup: true);
+        var statusText = new TextBlock
+        {
+            FontSize = 12,
+            TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(8, 0, 0, 0),
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        var statusRing = new ProgressRing { IsActive = false, Width = 14, Height = 14, VerticalAlignment = VerticalAlignment.Center };
+        var statusRow = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Margin = new Thickness(0, 8, 0, 0),
+            Visibility = Visibility.Collapsed
+        };
+        statusRow.Children.Add(statusRing);
+        statusRow.Children.Add(statusText);
+        form.Children.Add(statusRow);
+
+        var container = new StackPanel { MinWidth = 460 };
+        container.Children.Add(new TextBlock
+        {
+            Text = $"Share \"{group.Name}\" so others can subscribe to it.",
+            FontSize = 14,
+            TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(0, 0, 0, 16),
+            Opacity = 0.8
+        });
+        container.Children.Add(form);
+
+        var dialog = new ContentDialog
+        {
+            XamlRoot = this.XamlRoot,
+            Title = "Share Group",
+            Content = new ScrollViewer { Content = container, MaxHeight = 500 },
+            PrimaryButtonText = "Share",
+            CloseButtonText = "Cancel",
+            DefaultButton = ContentDialogButton.Primary,
+            IsPrimaryButtonEnabled = false
+        };
+
+        validateFunc(valid => dialog.IsPrimaryButtonEnabled = valid);
+
+        var result = await dialog.ShowAsync();
+        if (result != ContentDialogResult.Primary) return;
+
+        var finalSource = getSource();
+        string? password = getPassword();
+
+        // Wire up the group
+        group.SharedGroupId = finalSource.Id;
+        SettingsManager.Current.SharedGroupSources.Add(finalSource);
+        SettingsManager.SaveSettings();
+
+        // Do initial outgoing sync
+        statusRow.Visibility = Visibility.Visible;
+        statusRing.IsActive = true;
+        statusText.Text = "Syncing…";
+        var (success, message) = await SharedGroupSyncService.SyncOutgoingAsync(finalSource, group, password);
+        statusRing.IsActive = false;
+
+        if (!success)
+        {
+            // Rollback if initial sync fails
+            group.SharedGroupId = string.Empty;
+            SettingsManager.Current.SharedGroupSources.Remove(finalSource);
+            SettingsManager.SaveSettings();
+
+            await new ContentDialog
+            {
+                XamlRoot = this.XamlRoot,
+                Title = "Sharing Failed",
+                Content = $"Could not write the shared group file:\n{message}\n\nSharing was not set up.",
+                CloseButtonText = "OK"
+            }.ShowAsync();
+        }
+        else
+        {
+            RefreshList();
+            SettingsManager.SaveSettings();
+        }
+    }
+
+    // ── Subscribe dialog ─────────────────────────────────────────────────────
+
+    private async Task ShowAddSharedGroupDialog()
+    {
+        var source = new SharedGroupSource { IsOwner = false };
+
+        var nameBox = new TextBox
+        {
+            PlaceholderText = "e.g. Work Tools",
+            Margin = new Thickness(0, 0, 0, 12),
+            HorizontalAlignment = HorizontalAlignment.Stretch
+        };
+
+        var (sourceForm, getSource, getPassword, validateFunc) = BuildSharedGroupSourceForm(source, isSetup: false);
+
+        var container = new StackPanel { MinWidth = 460 };
+        container.Children.Add(new TextBlock
+        {
+            Text = "Subscribe to a group shared by another user. The group's content will be synced into your layout as read-only.",
+            FontSize = 13,
+            TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(0, 0, 0, 16),
+            Opacity = 0.8
+        });
+        container.Children.Add(Label("Group name (displayed in your launcher)"));
+        container.Children.Add(nameBox);
+        container.Children.Add(sourceForm);
+
+        var validationHint = new TextBlock
+        {
+            Foreground = new Microsoft.UI.Xaml.Media.SolidColorBrush(
+                global::Windows.UI.Color.FromArgb(255, 255, 69, 0)),
+            FontSize = 12,
+            TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(0, 8, 0, 0),
+            Visibility = Visibility.Collapsed
+        };
+        container.Children.Add(validationHint);
+
+        var dialog = new ContentDialog
+        {
+            XamlRoot = this.XamlRoot,
+            Title = "Add Shared Group",
+            Content = new ScrollViewer { Content = container, MaxHeight = 520 },
+            PrimaryButtonText = "Subscribe",
+            CloseButtonText = "Cancel",
+            DefaultButton = ContentDialogButton.Primary,
+            IsPrimaryButtonEnabled = false
+        };
+
+        bool sourceValid = false;
+        validateFunc(valid =>
+        {
+            sourceValid = valid;
+            dialog.IsPrimaryButtonEnabled = sourceValid && !string.IsNullOrWhiteSpace(nameBox.Text);
+        });
+        nameBox.TextChanged += (s, ev) =>
+        {
+            dialog.IsPrimaryButtonEnabled = sourceValid && !string.IsNullOrWhiteSpace(nameBox.Text);
+        };
+
+        var result = await dialog.ShowAsync();
+        if (result != ContentDialogResult.Primary) return;
+
+        var finalSource = getSource();
+        string? password = getPassword();
+        string groupName = nameBox.Text.Trim();
+
+        // Show a progress dialog while verifying and syncing (main dialog is already gone)
+        var progressLabel = new TextBlock
+        {
+            Text = "Verifying\u2026",
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(12, 0, 0, 0)
+        };
+        var progressRow = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 8, 0, 0) };
+        progressRow.Children.Add(new ProgressRing { IsActive = true, Width = 24, Height = 24, VerticalAlignment = VerticalAlignment.Center });
+        progressRow.Children.Add(progressLabel);
+        var progressDialog = new ContentDialog
+        {
+            XamlRoot = this.XamlRoot,
+            Title = "Adding Shared Group",
+            Content = progressRow
+        };
+        _ = progressDialog.ShowAsync();
+
+        // Verify the source before committing
+        var (verifyOk, itemCount, error) = await SharedGroupSyncService.VerifySourceAsync(finalSource, password);
+        if (!verifyOk)
+        {
+            progressDialog.Hide();
+            await new ContentDialog
+            {
+                XamlRoot = this.XamlRoot,
+                Title = "Could Not Subscribe",
+                Content = $"The shared group file could not be read:\n{error}",
+                CloseButtonText = "OK"
+            }.ShowAsync();
+            return;
+        }
+
+        progressLabel.Text = "Syncing\u2026";
+
+        // Add the source config FIRST so the template selector correctly identifies it
+        // as a subscriber when the ListView renders the new item on LauncherItems.Add.
+        SettingsManager.Current.SharedGroupSources.Add(finalSource);
+        var newGroup = LauncherItem.CreateGroup(groupName);
+        newGroup.SharedGroupId = finalSource.Id;
+        SettingsManager.Current.LauncherItems.Add(newGroup);
+
+        // Initial sync to populate children
+        var (syncOk, syncMsg) = await SharedGroupSyncService.SyncIncomingAsync(finalSource, password);
+        progressDialog.Hide();
+
+        if (!syncOk)
+        {
+            // Rollback on sync failure
+            SettingsManager.Current.LauncherItems.Remove(newGroup);
+            SettingsManager.Current.SharedGroupSources.Remove(finalSource);
+            await new ContentDialog
+            {
+                XamlRoot = this.XamlRoot,
+                Title = "Sync Failed",
+                Content = $"The group was found but could not be synced:\n{syncMsg}",
+                CloseButtonText = "OK"
+            }.ShowAsync();
+            return;
+        }
+
+        SaveAndUpdateTaskbar();
+        FlyoutWindow.InvalidateItems();
+    }
+
+    // ── Shared source form builder ────────────────────────────────────────────
+
+    /// <summary>
+    /// Builds a reusable form StackPanel that lets the user choose a local file path or
+    /// SFTP connection for a shared group source.
+    /// </summary>
+    /// <returns>
+    /// (form, getSource, getPassword, onValidChanged)
+    ///   getSource()     – returns a <see cref="SharedGroupSource"/> with the entered values.
+    ///   getPassword()   – returns the entered SFTP password (or null).
+    ///   onValidChanged  – call with a callback; it will be invoked whenever the form validity changes.
+    /// </returns>
+    private (StackPanel form,
+             Func<SharedGroupSource> getSource,
+             Func<string?> getPassword,
+             Action<Action<bool>> onValidChanged)
+        BuildSharedGroupSourceForm(SharedGroupSource template, bool isSetup)
+    {
+        // ── Source type radio buttons ─────────────────────────────────────
+        var localRadio = new RadioButton { Content = "Local file", GroupName = "SourceType", IsChecked = true };
+        var sftpRadio = new RadioButton { Content = "SFTP server", GroupName = "SourceType" };
+        var radioPanel = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 16, Margin = new Thickness(0, 0, 0, 12) };
+        radioPanel.Children.Add(localRadio);
+        radioPanel.Children.Add(sftpRadio);
+
+        // ── Local path panel ──────────────────────────────────────────────
+        var localPathBox = new TextBox
+        {
+            PlaceholderText = isSetup ? @"e.g. C:\Shared\my-group.xml" : @"e.g. C:\Shared\shared-group.xml",
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            Margin = new Thickness(0, 0, 0, 0)
+        };
+        var localBrowse = new Button
+        {
+            Content = "Browse…",
+            Padding = new Thickness(10, 5, 10, 5),
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(6, 0, 0, 0)
+        };
+        var localPathRow = new Grid { Margin = new Thickness(0, 0, 0, 0) };
+        localPathRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        localPathRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        Grid.SetColumn(localPathBox, 0);
+        Grid.SetColumn(localBrowse, 1);
+        localPathRow.Children.Add(localPathBox);
+        localPathRow.Children.Add(localBrowse);
+
+        var localPanel = new StackPanel { Spacing = 4 };
+        localPanel.Children.Add(Label("File path"));
+        localPanel.Children.Add(localPathRow);
+
+        // ── SFTP panel ────────────────────────────────────────────────────
+        var sftpHostBox = new TextBox { PlaceholderText = "hostname or IP", HorizontalAlignment = HorizontalAlignment.Stretch };
+        var sftpPortBox = new NumberBox { Value = 22, Minimum = 1, Maximum = 65535, SpinButtonPlacementMode = NumberBoxSpinButtonPlacementMode.Hidden, Width = 90 };
+        var sftpHostRow = new Grid { Margin = new Thickness(0, 0, 0, 8) };
+        sftpHostRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        sftpHostRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        sftpHostRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        Grid.SetColumn(sftpHostBox, 0);
+        Grid.SetColumn(new TextBlock { Text = "Port", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(8, 0, 6, 0) }, 1);
+        Grid.SetColumn(sftpPortBox, 2);
+        sftpHostRow.Children.Add(sftpHostBox);
+        var portLabel = new TextBlock { Text = "Port", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(8, 0, 6, 0) };
+        Grid.SetColumn(portLabel, 1);
+        sftpHostRow.Children.Add(portLabel);
+        Grid.SetColumn(sftpPortBox, 2);
+        sftpHostRow.Children.Add(sftpPortBox);
+
+        var sftpUserBox = new TextBox { PlaceholderText = "username", HorizontalAlignment = HorizontalAlignment.Stretch, Margin = new Thickness(0, 0, 0, 8) };
+        var sftpKeyBox = new TextBox { PlaceholderText = "(auto-detected)", HorizontalAlignment = HorizontalAlignment.Stretch };
+        var sftpKeyBrowse = new Button { Content = "Browse…", Padding = new Thickness(10, 5, 10, 5), VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(6, 0, 0, 0) };
+        var sftpKeyRow = new Grid { Margin = new Thickness(0, 0, 0, 8) };
+        sftpKeyRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        sftpKeyRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        Grid.SetColumn(sftpKeyBox, 0);
+        Grid.SetColumn(sftpKeyBrowse, 1);
+        sftpKeyRow.Children.Add(sftpKeyBox);
+        sftpKeyRow.Children.Add(sftpKeyBrowse);
+
+        var sftpPathBox = new TextBox
+        {
+            PlaceholderText = "~/.config/LittleLauncher/my-group.xml",
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            Margin = new Thickness(0, 0, 0, 8)
+        };
+
+        // Password (shown only when SFTP active)
+        var sftpPasswordBox = new PasswordBox { PlaceholderText = "SSH password (if no key)", HorizontalAlignment = HorizontalAlignment.Stretch };
+
+        var sftpPanel = new StackPanel { Spacing = 0 };
+        sftpPanel.Children.Add(Label("Host"));
+        sftpPanel.Children.Add(sftpHostRow);
+        sftpPanel.Children.Add(Label("Username"));
+        sftpPanel.Children.Add(sftpUserBox);
+        sftpPanel.Children.Add(Label("Private key path"));
+        sftpPanel.Children.Add(sftpKeyRow);
+        sftpPanel.Children.Add(Label("Remote file path"));
+        sftpPanel.Children.Add(sftpPathBox);
+        sftpPanel.Children.Add(Label("Password (if no key)"));
+        sftpPanel.Children.Add(sftpPasswordBox);
+
+        // ── Wire file picker for local path ───────────────────────────────
+        localBrowse.Click += async (s, ev) =>
+        {
+            if (isSetup)
+            {
+                var picker = new FileSavePicker();
+                InitializePicker(picker);
+                picker.SuggestedStartLocation = PickerLocationId.DocumentsLibrary;
+                picker.SuggestedFileName = "shared-group";
+                picker.FileTypeChoices.Add("XML files", new List<string> { ".xml" });
+                var file = await picker.PickSaveFileAsync();
+                if (file != null) localPathBox.Text = file.Path;
+            }
+            else
+            {
+                var picker = new FileOpenPicker();
+                InitializePicker(picker);
+                picker.SuggestedStartLocation = PickerLocationId.DocumentsLibrary;
+                picker.FileTypeFilter.Add(".xml");
+                picker.FileTypeFilter.Add("*");
+                var file = await picker.PickSingleFileAsync();
+                if (file != null) localPathBox.Text = file.Path;
+            }
+        };
+
+        // ── Wire key file picker ──────────────────────────────────────────
+        sftpKeyBrowse.Click += async (s, ev) =>
+        {
+            var picker = new FileOpenPicker();
+            InitializePicker(picker);
+            picker.SuggestedStartLocation = PickerLocationId.DocumentsLibrary;
+            picker.FileTypeFilter.Add("*");
+            var file = await picker.PickSingleFileAsync();
+            if (file != null) sftpKeyBox.Text = file.Path;
+        };
+
+        // ── Panel visibility sync ─────────────────────────────────────────
+        sftpPanel.Visibility = Visibility.Collapsed;
+        Action? notifyValidChanged = null;
+
+        void UpdatePanelVisibility()
+        {
+            bool sftp = sftpRadio.IsChecked == true;
+            localPanel.Visibility = sftp ? Visibility.Collapsed : Visibility.Visible;
+            sftpPanel.Visibility = sftp ? Visibility.Visible : Visibility.Collapsed;
+            notifyValidChanged?.Invoke();
+        }
+
+        localRadio.Checked += (s, ev) => UpdatePanelVisibility();
+        sftpRadio.Checked += (s, ev) => UpdatePanelVisibility();
+        localPathBox.TextChanged += (s, ev) => notifyValidChanged?.Invoke();
+        sftpHostBox.TextChanged += (s, ev) => notifyValidChanged?.Invoke();
+        sftpPathBox.TextChanged += (s, ev) => notifyValidChanged?.Invoke();
+
+        // ── Assemble form ─────────────────────────────────────────────────
+        var form = new StackPanel { Spacing = 4 };
+        form.Children.Add(Label("Destination"));
+        form.Children.Add(radioPanel);
+        form.Children.Add(localPanel);
+        form.Children.Add(sftpPanel);
+
+        // ── Getters ───────────────────────────────────────────────────────
+        Func<SharedGroupSource> getSource = () =>
+        {
+            bool sftp = sftpRadio.IsChecked == true;
+            return new SharedGroupSource
+            {
+                Id = template.Id,
+                IsOwner = template.IsOwner,
+                SourceType = sftp ? SharedGroupSourceType.Sftp : SharedGroupSourceType.LocalPath,
+                LocalPath = sftp ? "" : localPathBox.Text.Trim(),
+                SftpHost = sftp ? sftpHostBox.Text.Trim() : "",
+                SftpPort = sftp && !double.IsNaN(sftpPortBox.Value) ? (int)sftpPortBox.Value : 22,
+                SftpUsername = sftp ? sftpUserBox.Text.Trim() : "",
+                SftpPrivateKeyPath = sftp ? sftpKeyBox.Text.Trim() : "",
+                SftpRemotePath = sftp ? sftpPathBox.Text.Trim() : ""
+            };
+        };
+
+        Func<string?> getPassword = () =>
+        {
+            if (sftpRadio.IsChecked != true) return null;
+            var pw = sftpPasswordBox.Password;
+            return string.IsNullOrEmpty(pw) ? null : pw;
+        };
+
+        Action<Action<bool>> onValidChanged = callback =>
+        {
+            notifyValidChanged = () =>
+            {
+                bool sftp = sftpRadio.IsChecked == true;
+                bool valid = sftp
+                    ? !string.IsNullOrWhiteSpace(sftpHostBox.Text) && !string.IsNullOrWhiteSpace(sftpPathBox.Text)
+                    : !string.IsNullOrWhiteSpace(localPathBox.Text);
+                callback(valid);
+            };
+            notifyValidChanged();
+        };
+
+        return (form, getSource, getPassword, onValidChanged);
+    }
+
+    // ── SFTP password prompt ──────────────────────────────────────────────────
+
+    private async Task<string?> PromptForSftpPasswordAsync(string prompt)
+    {
+        var passwordBox = new PasswordBox
+        {
+            PlaceholderText = "SSH password",
+            HorizontalAlignment = HorizontalAlignment.Stretch
+        };
+        var form = new StackPanel { MinWidth = 340, Spacing = 8 };
+        form.Children.Add(new TextBlock { Text = prompt, TextWrapping = TextWrapping.Wrap });
+        form.Children.Add(passwordBox);
+
+        var dialog = new ContentDialog
+        {
+            XamlRoot = this.XamlRoot,
+            Title = "SSH Password",
+            Content = form,
+            PrimaryButtonText = "OK",
+            CloseButtonText = "Cancel",
+            DefaultButton = ContentDialogButton.Primary
+        };
+
+        var result = await dialog.ShowAsync();
+        if (result != ContentDialogResult.Primary) return null;
+        var pw = passwordBox.Password;
+        return string.IsNullOrEmpty(pw) ? null : pw;
+    }
+
     private async void ExportItems_Click(object sender, RoutedEventArgs e)
     {
         var items = SettingsManager.Current.LauncherItems;
@@ -2094,13 +2611,11 @@ public partial class LauncherItemsPage : Page
             collection.Add(item);
         }
 
-        RefreshList();
         SaveAndUpdateTaskbar();
 
-        // Fetch missing icons for imported items
+        // Fetch missing icons for imported items — IconPath changes fire INPC so bindings update automatically
         await FaviconService.FetchMissingItemIconsAsync(imported);
         SettingsManager.SaveSettings();
-        RefreshList();
 
         // Invalidate the flyout so it picks up new items + icons
         FlyoutWindow.InvalidateItems();

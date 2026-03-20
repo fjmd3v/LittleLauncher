@@ -32,7 +32,14 @@ param(
     [string]$Platform = $(if ($env:PROCESSOR_ARCHITECTURE -eq "ARM64") { "ARM64" } else { "x64" }),
 
     [ValidateSet("Debug", "Release")]
-    [string]$Configuration = "Release"
+    [string]$Configuration = "Release",
+
+    # Optional: path to a CA-trusted PFX certificate for Authenticode signing.
+    # When provided, the embedded exe files and the final MSIX are signed with this
+    # cert instead of the dev self-signed cert. Required to satisfy Smart App Control.
+    [string]$TrustedPfxPath = "",
+
+    [string]$TrustedPfxPassword = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -183,6 +190,28 @@ if ($LASTEXITCODE -ne 0) { Write-Error "makepri new failed"; exit 1 }
 # Clean up priconfig from layout
 Remove-Item $priconfigFile -Force -ErrorAction SilentlyContinue
 
+# ── Step 5b: Sign embedded executables (before packaging) ────────────────────
+# Smart App Control requires Authenticode signatures on all PE files from a
+# CA-trusted OV or EV code signing certificate.  Self-signed certs do NOT work.
+# Pass -TrustedPfxPath and -TrustedPfxPassword to enable this step.
+if (-not [string]::IsNullOrEmpty($TrustedPfxPath)) {
+    if (-not (Test-Path $TrustedPfxPath)) {
+        Write-Error "TrustedPfxPath not found: $TrustedPfxPath"
+        exit 1
+    }
+    Write-Host "`n=== Signing embedded executables (Authenticode) ===" -ForegroundColor Cyan
+    $exesToSign = Get-ChildItem $layoutDir -Filter "*.exe" -Recurse
+    foreach ($exe in $exesToSign) {
+        Write-Host "  Signing $($exe.Name) ..."
+        & $signtool sign /fd SHA256 /f $TrustedPfxPath /p $TrustedPfxPassword `
+            /tr http://timestamp.digicert.com /td SHA256 $exe.FullName
+        if ($LASTEXITCODE -ne 0) { Write-Error "signtool failed for $($exe.FullName)"; exit 1 }
+    }
+} else {
+    Write-Warning "TrustedPfxPath not specified — executables will not be Authenticode-signed."
+    Write-Warning "Smart App Control may block the app. Use -TrustedPfxPath to sign with a CA-trusted cert."
+}
+
 # ── Step 5: Package ───────────────────────────────────────────────────────────
 Write-Host "`n=== Packaging MSIX ===" -ForegroundColor Cyan
 
@@ -195,7 +224,14 @@ if ($LASTEXITCODE -ne 0) { Write-Error "makeappx pack failed"; exit 1 }
 # ── Step 6: Sign ──────────────────────────────────────────────────────────────
 Write-Host "`n=== Signing MSIX ===" -ForegroundColor Cyan
 
-& $signtool sign /fd SHA256 /a /f $pfxFile /p "LittleLauncher" $msixFile
+if (-not [string]::IsNullOrEmpty($TrustedPfxPath)) {
+    # Sign with the CA-trusted cert (satisfies Smart App Control)
+    & $signtool sign /fd SHA256 /f $TrustedPfxPath /p $TrustedPfxPassword `
+        /tr http://timestamp.digicert.com /td SHA256 $msixFile
+} else {
+    # Fall back to the dev self-signed cert (suitable for local testing only)
+    & $signtool sign /fd SHA256 /a /f $pfxFile /p "LittleLauncher" $msixFile
+}
 if ($LASTEXITCODE -ne 0) { Write-Error "signtool sign failed"; exit 1 }
 
 # ── Done ──────────────────────────────────────────────────────────────────────

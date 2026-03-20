@@ -38,7 +38,7 @@
                 </Grid.ColumnDefinitions>
                 <FontIcon Glyph="&#xE71B;" FontSize="20" Margin="0,0,16,0" VerticalAlignment="Center"/>
                 <TextBlock Grid.Column="1" Text="Port" FontSize="14" VerticalAlignment="Center"/>
-                <TextBox Grid.Column="2" x:Name="PortBox" Text="{Binding SftpPort, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Width="80"/>
+                <NumberBox Grid.Column="2" x:Name="PortBox" Value="{Binding SftpPort, Mode=TwoWay}" Minimum="1" Maximum="65535" SpinButtonPlacementMode="Hidden" Width="90"/>
             </Grid>
         </Border>
 

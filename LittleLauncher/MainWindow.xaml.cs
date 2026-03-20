@@ -601,7 +601,7 @@ public sealed partial class MainWindow : Window
             var items = SettingsManager.Current.LauncherItems;
             var allItems = items.SelectMany(i => i.IsGroup ? new[] { i }.Concat(i.Children) : [i]);
             bool anyMissing = allItems.Any(i =>
-                !i.IsHeading && !i.IsGroup &&
+                !i.IsGroup &&
                 !string.IsNullOrWhiteSpace(i.Path) &&
                 (string.IsNullOrEmpty(i.IconPath) || !File.Exists(i.IconPath)));
 
@@ -664,7 +664,7 @@ public sealed partial class MainWindow : Window
         try
         {
             var activatedArgs = Microsoft.Windows.AppLifecycle.AppInstance.GetCurrent().GetActivatedEventArgs();
-            if (activatedArgs.Kind == Microsoft.Windows.AppLifecycle.ExtendedActivationKind.StartupTask)
+            if (activatedArgs?.Kind == Microsoft.Windows.AppLifecycle.ExtendedActivationKind.StartupTask)
                 return true;
         }
         catch { /* Not available or not packaged — treat as normal launch */ }
@@ -675,10 +675,11 @@ public sealed partial class MainWindow : Window
     /// <summary>
     /// Ensures the Windows startup registry entry includes --silent so the app
     /// starts silently on login. Migrates existing entries that lack the flag.
+    /// Runs unconditionally so entries created by old versions (before --silent
+    /// was added) are fixed regardless of the in-app Startup setting.
     /// </summary>
     private static void MigrateStartupRegistryEntry()
     {
-        if (!SettingsManager.Current.Startup) return;
         try
         {
             using var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(
@@ -904,8 +905,11 @@ public sealed partial class MainWindow : Window
             }
             catch { /* best-effort cleanup */ }
 
-            // Global broadcast so the shell refreshes any remaining cached icons.
-            SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST | SHCNF_FLUSHNOWAIT, IntPtr.Zero, IntPtr.Zero);
+            // NOTE: Do NOT send SHCNE_ASSOCCHANGED here. That global broadcast causes the shell
+            // to reload from the persistent IconCache.db, which may still contain the previous
+            // icon — overwriting the in-memory update delivered by the targeted SHCNE_UPDATEITEM
+            // notifications above. Since we use a uniquely-versioned icon file path for each
+            // change, the per-.lnk SHCNE_UPDATEITEM | SHCNF_FLUSH is sufficient.
         }
         catch (Exception ex)
         {

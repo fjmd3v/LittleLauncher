@@ -24,6 +24,8 @@ namespace LittleLauncher.Windows;
 
 public partial class FlyoutWindow : Window
 {
+    private const int ColumnWidth = 175;
+
     private static readonly NLog.Logger Logger = NLog.LogManager.GetCurrentClassLogger();
     private static readonly object BoundsFileLock = new();
     private static readonly ConcurrentDictionary<string, WindowBounds> CachedBounds = new(StringComparer.OrdinalIgnoreCase);
@@ -118,7 +120,7 @@ public partial class FlyoutWindow : Window
         double dpiScale = GetDpiForWindow(_instance._hwnd) / 96.0;
         if (dpiScale <= 0) dpiScale = 1.0;
         int columnCount = Math.Max(1, _instance.ColumnsPanel.Children.Count);
-        int flyoutWidthPx = (int)(200 * columnCount * dpiScale);
+        int flyoutWidthPx = (int)(ColumnWidth * columnCount * dpiScale);
         int flyoutHeightPx = (int)Math.Ceiling(_instance.MeasureContentHeight() * dpiScale);
 
         // Position off-screen first, then show
@@ -199,7 +201,6 @@ public partial class FlyoutWindow : Window
         hash.Add(item.OpenInAppWindow);
         hash.Add(item.AppWindowBrowser);
         hash.Add(item.AppWindowBrowserProfile);
-        hash.Add(item.IsHeading);
         hash.Add(item.IsGroup);
         hash.Add(item.IsPwa);
         hash.Add(item.IsColumnBreak);
@@ -240,7 +241,7 @@ public partial class FlyoutWindow : Window
     {
         var lv = new ListView
         {
-            Width = 200,
+            Width = ColumnWidth,
             Padding = new Thickness(8, 6, 8, 6),
             IsItemClickEnabled = true,
             SelectionMode = ListViewSelectionMode.None,
@@ -308,7 +309,7 @@ public partial class FlyoutWindow : Window
         var workArea = monitorInfo.rcWork;
 
         int columnCount = Math.Max(1, ColumnsPanel.Children.Count);
-        int flyoutWidth = (int)(200 * columnCount * scale);
+        int flyoutWidth = (int)(ColumnWidth * columnCount * scale);
         int flyoutHeight = (int)Math.Ceiling(MeasureContentHeight() * scale);
         int gap = Math.Max(4, (int)Math.Round(8 * scale));
 
@@ -354,7 +355,7 @@ public partial class FlyoutWindow : Window
     {
         if (e.ClickedItem is not LauncherItem item) return;
 
-        if (item.IsGroup || item.IsHeading) return;
+        if (item.IsGroup) return;
 
         HideFlyout();
         _lastDismissed = DateTime.UtcNow;
@@ -377,20 +378,44 @@ public partial class FlyoutWindow : Window
             }
             else if (item.Path.StartsWith("shell:", StringComparison.OrdinalIgnoreCase))
             {
-                // Store / packaged apps use shell:AppsFolder\{AUMID}
-                Process.Start(new ProcessStartInfo("explorer.exe")
-                {
-                    Arguments = item.Path,
-                    UseShellExecute = false
-                });
-            }
-            else
-            {
+                // Store / packaged apps: ShellExecuteEx understands shell:AppsFolder\{AUMID}
+                // and forwards lpParameters (Arguments) to the activated package.
                 Process.Start(new ProcessStartInfo(item.Path)
                 {
                     UseShellExecute = true,
                     Arguments = item.Arguments ?? ""
                 });
+            }
+            else
+            {
+                var args = item.Arguments ?? "";
+                var path = item.Path;
+                ProcessStartInfo psi;
+                if (path.EndsWith(".lnk", StringComparison.OrdinalIgnoreCase))
+                {
+                    // Shell resolves .lnk; user-supplied Arguments are intentionally ignored
+                    psi = new ProcessStartInfo(path) { UseShellExecute = true };
+                }
+                else if (path.EndsWith(".bat", StringComparison.OrdinalIgnoreCase)
+                      || path.EndsWith(".cmd", StringComparison.OrdinalIgnoreCase))
+                {
+                    psi = new ProcessStartInfo("cmd.exe")
+                    {
+                        Arguments = $"/c \"{path}\" {args}",
+                        UseShellExecute = false
+                    };
+                }
+                else
+                {
+                    // Use CreateProcess directly so arguments are always forwarded,
+                    // including for MSIX App Execution Aliases (e.g. wt.exe).
+                    psi = new ProcessStartInfo(path)
+                    {
+                        Arguments = args,
+                        UseShellExecute = false
+                    };
+                }
+                Process.Start(psi);
             }
             Logger.Info($"Launched from flyout: {item.Name} ({item.Path})");
         }
@@ -404,7 +429,7 @@ public partial class FlyoutWindow : Window
     {
         if (e.OriginalSource is not FrameworkElement fe) return;
         var item = fe.DataContext as LauncherItem;
-        if (item == null || item.IsHeading || item.IsGroup) return;
+        if (item == null || item.IsGroup) return;
 
         var lv = sender as ListView ?? ItemsListControl_GetAny();
         var flyout = new MenuFlyout();
@@ -734,7 +759,6 @@ public partial class FlyoutWindow : Window
         // Heading content:      FontSize=11 (~15px) + Margin top 4 → total ~31px
         const double itemHeight = 32;
         const double groupHeight = 33;
-        const double headingHeight = 31;
         const double listPadding = 12;     // ListView Padding="8,6,8,6" → 6+6
 
         var items = SettingsManager.Current.LauncherItems;
@@ -755,8 +779,6 @@ public partial class FlyoutWindow : Window
 
             if (item.IsGroup)
                 currentColumnHeight += groupHeight;
-            else if (item.IsHeading)
-                currentColumnHeight += headingHeight;
             else
                 currentColumnHeight += itemHeight;
 
@@ -764,10 +786,7 @@ public partial class FlyoutWindow : Window
             {
                 foreach (var child in item.Children)
                 {
-                    if (child.IsHeading)
-                        currentColumnHeight += headingHeight;
-                    else
-                        currentColumnHeight += itemHeight;
+                    currentColumnHeight += itemHeight;
                 }
             }
         }

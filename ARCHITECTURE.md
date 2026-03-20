@@ -61,8 +61,31 @@ After bulk icon changes, callers invoke `FlyoutWindow.InvalidateItems()` so the 
 - Downloads launcher items on startup.
 - Debounced upload (3 s) when items change.
 - Periodic download on a configurable interval.
+- Also syncs all shared groups on startup and periodically (via `SharedGroupSyncService`).
 
 Supports both private-key (`PrivateKeyFile`) and password-based authentication.
+
+## Shared group sync
+
+`SharedGroupSyncService` provides 1-way sync for individual launcher item **groups** that are shared between users.
+
+- **Owner** (publisher): serializes the group's `Children` to a `List<LauncherItem>` XML and writes it to a local file or SFTP path. The group name is **not** included in the file — each subscriber chooses their own name.
+- **Subscriber** (consumer): reads the XML from the same location and replaces their local group's `Children`. The group is read-only in the UI.
+
+Configuration per shared group is stored in `UserSettings.SharedGroupSources` as `SharedGroupSource` objects. Each source references its linked `LauncherItem` group via a matching `SharedGroupId` GUID.
+
+**Setup flow (owner):** Click the share icon on a normal group → `ShowShareGroupDialog` → pick local path or SFTP connection → initial outgoing sync.
+
+**Setup flow (subscriber):** Click "Add Shared Group" → `ShowAddSharedGroupDialog` → enter group name + location → file is verified, then a new read-only group is added.
+
+**Removing sharing:**
+- Owner: Edit dialog → "Stop Sharing" button → clears `SharedGroupId`, removes `SharedGroupSource`.
+- Subscriber: Remove button → removes the group item and its `SharedGroupSource`.
+
+**Sync triggers:**
+- Startup: `AutoSyncService.SyncOnStartupAsync()` calls `SyncAllIncomingAsync` + `SyncAllOutgoingAsync`.
+- Periodic: periodic download also calls `SyncAllIncomingAsync`.
+- Manual: "Sync Now" button in the settings page (owner = outgoing, subscriber = incoming).
 
 ## Theme system
 

@@ -43,5 +43,14 @@ applyTo: "**/ViewModels/UserSettings*.cs"
 Group related properties together with comment headers matching existing style:
 - Appearance & Behaviour
 - Taskbar Widget
-- Launcher Items
+- Launcher Items (includes `LauncherItems` collection and `SharedGroupSources`)
 - SFTP Sync
+
+## SharedGroupSources
+
+`UserSettings.SharedGroupSources` is a `List<SharedGroupSource>` (not `ObservableCollection`). Each entry:
+- Links to a `LauncherItem` group via matching `SharedGroupSource.Id` ↔ `LauncherItem.SharedGroupId`.
+- `IsOwner = true` → this user publishes the group to a local file or SFTP path.
+- `IsOwner = false` → this user subscribes; group children are replaced on sync.
+
+When a shared group is removed from the launcher items, its `SharedGroupSource` must also be removed from this list (handled in `LauncherItemsPage.RemoveItem_Click`).

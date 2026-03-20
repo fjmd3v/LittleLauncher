@@ -1,6 +1,7 @@
 using CommunityToolkit.Mvvm.ComponentModel;
 using LittleLauncher.Classes.Settings;
 using LittleLauncher.Models;
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Xml.Serialization;
 
@@ -90,6 +91,12 @@ public partial class UserSettings : ObservableObject
     /// <summary>Application / website shortcuts shown in the taskbar widget.</summary>
     public ObservableCollection<LauncherItem> LauncherItems { get; set; }
 
+    /// <summary>
+    /// Shared group sources — both groups this user publishes (IsOwner = true)
+    /// and groups subscribed from others (IsOwner = false).
+    /// </summary>
+    public List<SharedGroupSource> SharedGroupSources { get; set; }
+
     // ── SFTP Sync ───────────────────────────────────────────────────
 
     /// <summary>SSH/SFTP hostname or IP address.</summary>
@@ -139,6 +146,7 @@ public partial class UserSettings : ObservableObject
         // Do NOT populate defaults here — XmlSerializer calls this constructor
         // then appends deserialized items, which would double the list.
         LauncherItems = [];
+        SharedGroupSources = [];
 
         SftpHost = "";
         SftpPort = 22;

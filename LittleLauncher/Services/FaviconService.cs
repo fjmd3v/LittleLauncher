@@ -546,7 +546,7 @@ internal static partial class FaviconService
                 continue;
             }
 
-            if (item.IsHeading || string.IsNullOrWhiteSpace(item.Path))
+            if (string.IsNullOrWhiteSpace(item.Path))
                 continue;
 
             // Already has a valid local icon

@@ -16,7 +16,6 @@
             <local:FlyoutItemTemplateSelector
                 x:Key="ItemTemplateSelector"
                 GroupTemplate="{StaticResource GroupTemplate}"
-                HeadingTemplate="{StaticResource HeadingTemplate}"
                 ItemTemplate="{StaticResource LauncherItemTemplate}" />
 
             <!-- Group heading row -->
@@ -28,22 +27,6 @@
                         FontSize="11"
                         FontWeight="Bold"
                         Opacity="0.6"
-                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                        VerticalAlignment="Center"
-                        TextWrapping="NoWrap"
-                        TextTrimming="CharacterEllipsis" />
-                </Grid>
-            </DataTemplate>
-
-            <!-- Heading row -->
-            <DataTemplate x:Key="HeadingTemplate">
-                <Grid Margin="0,4,0,0"
-                      HorizontalAlignment="Stretch">
-                    <TextBlock
-                        Text="{Binding Name}"
-                        FontSize="11"
-                        FontWeight="SemiBold"
-                        Opacity="0.78"
                         Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                         VerticalAlignment="Center"
                         TextWrapping="NoWrap"
@@ -109,28 +92,6 @@
                                         VerticalContentAlignment="{TemplateBinding VerticalContentAlignment}" />
                                 </Border>
                             </Grid>
-                        </ControlTemplate>
-                    </Setter.Value>
-                </Setter>
-            </Style>
-
-            <!-- Container style for heading items (no hover effect) -->
-            <Style x:Key="HeadingItemContainerStyle" TargetType="ListViewItem">
-                <Setter Property="IsTabStop" Value="False" />
-                <Setter Property="MinHeight" Value="0" />
-                <Setter Property="Padding" Value="8,6" />
-                <Setter Property="HorizontalContentAlignment" Value="Stretch" />
-                <Setter Property="Template">
-                    <Setter.Value>
-                        <ControlTemplate TargetType="ListViewItem">
-                            <Border Padding="{TemplateBinding Padding}">
-                                <ContentPresenter
-                                    Content="{TemplateBinding Content}"
-                                    ContentTemplate="{TemplateBinding ContentTemplate}"
-                                    ContentTransitions="{TemplateBinding ContentTransitions}"
-                                    HorizontalContentAlignment="{TemplateBinding HorizontalContentAlignment}"
-                                    VerticalContentAlignment="{TemplateBinding VerticalContentAlignment}" />
-                            </Border>
                         </ControlTemplate>
                     </Setter.Value>
                 </Setter>
@@ -202,7 +163,6 @@
             <local:FlyoutItemContainerStyleSelector
                 x:Key="ItemContainerStyleSelector"
                 GroupStyle="{StaticResource GroupItemContainerStyle}"
-                HeadingStyle="{StaticResource HeadingItemContainerStyle}"
                 ItemStyle="{StaticResource LauncherItemContainerStyle}" />
 
             <!-- Launcher item row -->

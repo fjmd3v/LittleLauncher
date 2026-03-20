@@ -52,6 +52,45 @@ jobs:
       - name: Build (dotnet)
         run: dotnet build LittleLauncher/LittleLauncher.csproj -c Release -p:Platform=$env:PLATFORM
 
+      # ── Authenticode signing ────────────────────────────────────
+      # Requires two GitHub repository secrets:
+      #   CODESIGN_PFX_BASE64  — base64-encoded PFX certificate file
+      #   CODESIGN_PFX_PASSWORD — password for the PFX certificate
+      #
+      # To encode your PFX: [Convert]::ToBase64String([IO.File]::ReadAllBytes("cert.pfx"))
+      # Obtain a certificate from DigiCert, Sectigo, or another trusted CA.
+      # EV certificates grant instant reputation with Smart App Control; OV certificates
+      # build reputation over time. Self-signed certificates do NOT satisfy SAC.
+      - name: Sign executables
+        shell: pwsh
+        env:
+          CODESIGN_PFX_BASE64: ${{ secrets.CODESIGN_PFX_BASE64 }}
+          CODESIGN_PFX_PASSWORD: ${{ secrets.CODESIGN_PFX_PASSWORD }}
+        run: |
+          if ([string]::IsNullOrEmpty($env:CODESIGN_PFX_BASE64)) {
+            Write-Host "CODESIGN_PFX_BASE64 secret not set — skipping Authenticode signing." -ForegroundColor Yellow
+            Write-Host "Smart App Control may block unsigned binaries. See README for setup instructions."
+            exit 0
+          }
+
+          $pfxPath = Join-Path $env:RUNNER_TEMP "codesign.pfx"
+          [IO.File]::WriteAllBytes($pfxPath, [Convert]::FromBase64String($env:CODESIGN_PFX_BASE64))
+
+          $binDir = "LittleLauncher\bin\$env:PLATFORM\Release\net10.0-windows10.0.22000.0"
+          $exes = @(
+            "$binDir\LittleLauncher.exe",
+            "$binDir\LittleLauncherFlyout.exe"
+          ) | Where-Object { Test-Path $_ }
+
+          foreach ($exe in $exes) {
+            Write-Host "Signing $exe ..."
+            & signtool sign /fd SHA256 /f $pfxPath /p $env:CODESIGN_PFX_PASSWORD `
+              /tr http://timestamp.digicert.com /td SHA256 $exe
+            if ($LASTEXITCODE -ne 0) { Write-Error "signtool failed for $exe"; exit 1 }
+          }
+
+          Remove-Item $pfxPath -Force
+
       - name: Upload build output
         uses: actions/upload-artifact@v4
         with:
@@ -66,6 +105,29 @@ jobs:
             -p:Configuration=Release `
             "-p:BuildOutputPath=$env:GITHUB_WORKSPACE\LittleLauncher\bin\$env:PLATFORM\Release\net10.0-windows10.0.22000.0" `
             "-p:Version=${{ steps.version.outputs.VERSION }}"
+
+      # ── Sign MSI ────────────────────────────────────────────────
+      - name: Sign MSI
+        shell: pwsh
+        env:
+          CODESIGN_PFX_BASE64: ${{ secrets.CODESIGN_PFX_BASE64 }}
+          CODESIGN_PFX_PASSWORD: ${{ secrets.CODESIGN_PFX_PASSWORD }}
+        run: |
+          if ([string]::IsNullOrEmpty($env:CODESIGN_PFX_BASE64)) {
+            Write-Host "CODESIGN_PFX_BASE64 secret not set — skipping MSI signing." -ForegroundColor Yellow
+            exit 0
+          }
+
+          $pfxPath = Join-Path $env:RUNNER_TEMP "codesign.pfx"
+          [IO.File]::WriteAllBytes($pfxPath, [Convert]::FromBase64String($env:CODESIGN_PFX_BASE64))
+
+          $msi = "LittleLauncherSetup\bin\$env:PLATFORM\Release\LittleLauncherSetup.msi"
+          Write-Host "Signing $msi ..."
+          & signtool sign /fd SHA256 /f $pfxPath /p $env:CODESIGN_PFX_PASSWORD `
+            /tr http://timestamp.digicert.com /td SHA256 $msi
+          if ($LASTEXITCODE -ne 0) { Write-Error "signtool failed for MSI"; exit 1 }
+
+          Remove-Item $pfxPath -Force
 
       - name: Upload MSI artifact
         uses: actions/upload-artifact@v4

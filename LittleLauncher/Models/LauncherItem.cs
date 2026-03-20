@@ -75,19 +75,17 @@ public partial class LauncherItem : ObservableObject
     public partial bool IsPwa { get; set; }
 
     /// <summary>
-    /// Whether this item is a heading (true) or a launchable item (false).
-    /// Heading items only use the Name property; all other fields are ignored.
-    /// Serialized as "IsCategory" for backward compatibility with older settings files.
-    /// </summary>
-    [ObservableProperty]
-    [XmlElement("IsCategory")]
-    public partial bool IsHeading { get; set; }
-
-    /// <summary>
     /// Whether this item is a collapsible group that contains child items/headings.
     /// </summary>
     [ObservableProperty]
     public partial bool IsGroup { get; set; }
+
+    /// <summary>
+    /// ID of the <see cref="LittleLauncher.Models.SharedGroupSource"/> this group is linked to.
+    /// Empty string for normal (unshared) groups. Only meaningful when <see cref="IsGroup"/> is true.
+    /// </summary>
+    [ObservableProperty]
+    public partial string SharedGroupId { get; set; }
 
     /// <summary>
     /// Whether this item is a column break. Column breaks split the flyout into multiple
@@ -120,9 +118,9 @@ public partial class LauncherItem : ObservableObject
         AppWindowBrowser = string.Empty;
         AppWindowBrowserProfile = string.Empty;
         IsPwa = false;
-        IsHeading = false;
         IsGroup = false;
         IsColumnBreak = false;
+        SharedGroupId = string.Empty;
     }
 
     public LauncherItem(string name, string path, string iconGlyph, bool isWebsite = false, string arguments = "", string iconPath = "", bool openInAppWindow = false)
@@ -137,19 +135,10 @@ public partial class LauncherItem : ObservableObject
         AppWindowBrowser = string.Empty;
         AppWindowBrowserProfile = string.Empty;
         IsPwa = false;
-        IsHeading = false;
         IsGroup = false;
         IsColumnBreak = false;
+        SharedGroupId = string.Empty;
     }
-
-    /// <summary>
-    /// Creates a heading item with only a name.
-    /// </summary>
-    public static LauncherItem CreateHeading(string name) => new()
-    {
-        Name = name,
-        IsHeading = true
-    };
 
     /// <summary>
     /// Creates a group item with only a name.
