@@ -1,31 +1,46 @@
 // Copyright © 2024-2026 The Little Launcher Authors
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+using LittleLauncher.Models;
 using LittleLauncher.ViewModels;
+using System.Collections.Generic;
 using System.IO;
+using System.Linq;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Xml.Serialization;
 
 namespace LittleLauncher.Classes.Settings;
 
 /// <summary>
 /// Manages the application settings and saves them to a file in \AppData\LittleLauncher.
+/// On first load, migrates from settings.xml (XmlSerializer) to settings.json (System.Text.Json).
 /// </summary>
 public static class SettingsManager
 {
     private static readonly NLog.Logger Logger = NLog.LogManager.GetCurrentClassLogger();
 
-    private static string SettingsFilePath => Path.Combine(
+    private static string SettingsDir => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-        "LittleLauncher",
-        "settings.xml"
-    );
+        "LittleLauncher");
+
+    private static string SettingsFilePath => Path.Combine(SettingsDir, "settings.json");
+
+    /// <summary>Legacy XML settings path — used for one-time migration only.</summary>
+    private static string LegacyXmlPath => Path.Combine(SettingsDir, "settings.xml");
+
+    internal static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        WriteIndented = true,
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingDefault,
+        PropertyNamingPolicy = null, // PascalCase to match property names
+    };
 
     private static UserSettings _current = new();
 
     /// <summary>
     /// The current user settings stored in the app.
     /// </summary>
-    /// <returns>The current user settings.</returns>
     public static UserSettings Current
     {
         get
@@ -40,30 +55,57 @@ public static class SettingsManager
     }
 
     /// <summary>
-    /// Restores the settings <see cref="Current"/> from the settings file.
+    /// Flat enumeration of all <see cref="LauncherItem"/> objects across every launcher's Items
+    /// collection (including group children). Use when a search must span all layouts.
     /// </summary>
-    /// <returns>The restored settings.</returns>
+    public static IEnumerable<LauncherItem> AllItems =>
+        _current?.Launchers
+            .SelectMany(l => l.Items.SelectMany(i => i.IsGroup ? new[] { i }.Concat(i.Children) : [i]))
+        ?? Enumerable.Empty<LauncherItem>();
+
+    /// <summary>
+    /// Restores the settings <see cref="Current"/> from the settings file.
+    /// Migrates from legacy XML format if the JSON file doesn't exist.
+    /// </summary>
     public static UserSettings RestoreSettings(string? filePath = null)
     {
         filePath ??= SettingsFilePath;
 
         try
         {
+            // ── Try JSON first ──────────────────────────────────────────
             if (File.Exists(filePath))
             {
-                using (StreamReader reader = new StreamReader(filePath))
+                string json = File.ReadAllText(filePath);
+                var deserialized = JsonSerializer.Deserialize<UserSettings>(json, JsonOptions);
+                if (deserialized != null)
+                {
+                    _current = deserialized;
+                    _current.CompleteInitialization();
+                    NormalizeAllGlyphs();
+                    Logger.Info("Settings successfully restored");
+                    return _current;
+                }
+            }
+
+            // ── Migrate from legacy XML ─────────────────────────────────
+            if (File.Exists(LegacyXmlPath))
+            {
+                Logger.Info("Migrating settings from XML to JSON");
+                using (StreamReader reader = new StreamReader(LegacyXmlPath))
                 {
                     XmlSerializer xmlSerializer = new XmlSerializer(typeof(UserSettings));
-                    if (xmlSerializer.Deserialize(reader) is UserSettings deserialized)
+                    if (xmlSerializer.Deserialize(reader) is UserSettings xmlSettings)
                     {
-                        _current = deserialized;
+                        _current = xmlSettings;
                         _current.CompleteInitialization();
+                        NormalizeAllGlyphs();
 
-                        // Normalize legacy glyph text names from older settings files
-                        foreach (var item in _current.LauncherItems)
-                            item.NormalizeGlyph();
+                        // Save in new JSON format and rename old file
+                        SaveSettings();
+                        try { File.Move(LegacyXmlPath, LegacyXmlPath + ".bak", overwrite: true); } catch { }
 
-                        Logger.Info("Settings successfully restored");
+                        Logger.Info("Settings migrated from XML to JSON");
                         return _current;
                     }
                 }
@@ -71,7 +113,7 @@ public static class SettingsManager
         }
         catch (UnauthorizedAccessException ex)
         {
-            Logger.Error(ex, "No permission to write in settings file");
+            Logger.Error(ex, "No permission to read settings file");
         }
         catch (Exception ex)
         {
@@ -100,21 +142,31 @@ public static class SettingsManager
                 Directory.CreateDirectory(directory);
             }
 
-            using (StreamWriter writer = new StreamWriter(filePath))
-            {
-                XmlSerializer xmlSerializer = new XmlSerializer(typeof(UserSettings));
-                xmlSerializer.Serialize(writer, _current);
-            }
+            string json = JsonSerializer.Serialize(_current, JsonOptions);
+            File.WriteAllText(filePath, json);
         }
         catch (UnauthorizedAccessException ex)
         {
-            // if the app doesn't have permission to write to the settings file
             Logger.Error(ex, "No permission to write in settings file");
         }
         catch (Exception ex)
         {
-            // if the settings file cannot be saved
             Logger.Error(ex, "Error saving settings");
+        }
+    }
+
+    /// <summary>Normalize legacy glyph text names across all launchers' items.</summary>
+    private static void NormalizeAllGlyphs()
+    {
+        foreach (var launcher in _current.Launchers)
+        {
+            foreach (var item in launcher.Items)
+            {
+                item.NormalizeGlyph();
+                if (item.IsGroup)
+                    foreach (var child in item.Children)
+                        child.NormalizeGlyph();
+            }
         }
     }
 }

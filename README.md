@@ -23,13 +23,16 @@ Little Launcher lives in the Windows system tray. Clicking the tray icon opens a
 
 **Key features:**
 
+- **Multiple launchers** — define multiple named launchers, each with its own tray icon, items, and appearance.
 - **System-tray launcher** — a tray icon that opens a flyout popup for shortcuts.
 - **Application & website shortcuts** — launch any executable or URL with one click from the flyout.
-- **SSH/SFTP settings sync** — upload/download your `settings.xml` to a remote server using SSH.NET.
+- **Groups & columns** — organise items into collapsible groups and multi-column layouts.
+- **SSH/SFTP settings sync** — upload/download all launchers to a remote server using SSH.NET.
+- **Shared launchers** — share individual launchers via local/network files or per-launcher SFTP. Owners publish items; subscribers receive read-only copies.
 - **WinUI 3 settings UI** — a native window with Mica backdrop and page-based `NavigationView`.
 - **Taskbar pinning** — a companion helper exe (`LauncherShortcut`) can be pinned to the taskbar so one click opens the flyout without needing to find the tray icon.
 - **Theme support** — follows the Windows system theme or can be set to Light/Dark explicitly.
-- **Export & import** — back up and restore settings locally via XML.
+- **Export & import** — back up and restore items locally via JSON.
 
 ## Architecture
 
@@ -37,9 +40,10 @@ Little Launcher lives in the Windows system tray. Clicking the tray icon opens a
 |---|---|
 | `MainWindow` | Invisible host window. Owns the system-tray icon (`H.NotifyIcon`). Enforces single-instance via Mutex. Cross-process IPC via registered window messages. |
 | `FlyoutWindow` | A popup window that displays launcher items with icons, positioned above the taskbar. Dismissed on focus loss or Escape. |
-| `SettingsWindow` | WinUI 3 window with `MicaBackdrop` and `NavigationView` — pages for Home, Launcher Items, Cloud Sync, Settings, and About. |
-| `SftpSyncService` | Static async methods for upload/download/test-connection using SSH.NET (`Renci.SshNet`). Supports private-key and password auth. |
-| `SettingsManager` | Fully static. Serialises `UserSettings` to `%AppData%\LittleLauncher\settings.xml` via `XmlSerializer`. |
+| `SettingsWindow` | WinUI 3 window with `MicaBackdrop` and `NavigationView` — pages for Home, Launchers, Launcher Items, Cloud Sync, Settings, and About. |
+| `SftpSyncService` | Static async methods for upload/download/test-connection using SSH.NET (`Renci.SshNet`). Also handles per-launcher shared sync (file or SFTP). Supports private-key and password auth. |
+| `AutoSyncService` | Manages automatic sync: startup download, debounced upload, periodic download, and shared launcher sync. |
+| `SettingsManager` | Fully static. Serialises `UserSettings` to `%AppData%\LittleLauncher\settings.json` via `System.Text.Json`. Migrates from legacy `settings.xml` on first load. |
 | `ThemeManager` | Sets `RequestedTheme` on root `FrameworkElement` of each window. Detects system dark/light mode via cached `UISettings`. |
 
 ## Tech stack
@@ -89,19 +93,23 @@ LittleLauncher/              # WinUI 3 application project
 │   ├── NativeMethods.cs       # P/Invoke declarations (user32, dwmapi, shcore, comctl32, shlwapi)
 │   ├── ThemeManager.cs        # Theme orchestration (ElementTheme)
 │   └── Settings/
-│       └── SettingsManager.cs # XML serialisation (fully static)
+│       └── SettingsManager.cs # JSON serialisation (fully static)
 ├── Models/
 │   ├── LauncherItem.cs
+│   ├── Launcher.cs            # Multi-launcher model with sharing properties
 │   └── SshConnectionProfile.cs
 ├── Pages/
 │   ├── HomePage.xaml/.cs
-│   ├── LauncherItemsPage.xaml/.cs
+│   ├── LaunchersPage.xaml/.cs  # Launcher card management + sharing UI
+│   ├── LauncherItemsPage.xaml/.cs # Per-launcher item editing (read-only for subscribers)
 │   ├── SyncPage.xaml/.cs
 │   ├── SystemPage.xaml/.cs
 │   └── AboutPage.xaml/.cs
 ├── Services/
+│   ├── AutoSyncService.cs     # Automatic sync triggers
 │   ├── FaviconService.cs      # Website favicon & title fetching
-│   └── SftpSyncService.cs     # SSH/SFTP upload/download/test
+│   ├── SftpSyncService.cs     # SSH/SFTP upload/download/test + shared sync
+│   └── UpdateService.cs       # Update checking
 ├── ViewModels/
 │   └── UserSettings.cs        # Observable settings (CommunityToolkit.Mvvm)
 ├── Windows/

@@ -44,10 +44,10 @@
                         <ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
                     <StackPanel Orientation="Horizontal">
-                        <FontIcon Glyph="&#xE71D;" FontSize="30" Margin="0,0,12,0" />
+                        <FontIcon Glyph="&#xF0E2;" FontSize="30" Margin="0,0,12,0" />
                         <StackPanel>
-                            <TextBlock FontWeight="Medium" Text="Launcher Items" />
-                            <TextBlock Text="Manage your shortcuts" Opacity="0.5" FontSize="12" />
+                            <TextBlock FontWeight="Medium" Text="Launchers" />
+                            <TextBlock Text="Manage launchers &amp; shortcuts" Opacity="0.5" FontSize="12" />
                         </StackPanel>
                     </StackPanel>
                     <FontIcon Grid.Column="1" Glyph="&#xE76C;" FontSize="14" Opacity="0.3" VerticalAlignment="Center"/>
@@ -76,43 +76,6 @@
             </Border>
         </Grid>
 
-        <TextBlock Text="Flyout Access" FontSize="14" FontWeight="SemiBold" Margin="0,24,0,6" />
-
-        <Border CornerRadius="4" Padding="16" Margin="0,0,0,4"
-                Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1">
-            <Grid>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="Auto" />
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="Auto" />
-                </Grid.ColumnDefinitions>
-                <FontIcon Grid.Column="0" Glyph="&#xEA8F;" Margin="0,0,16,0" />
-                <StackPanel Grid.Column="1">
-                    <TextBlock Text="Show Tray Icon" FontSize="14" />
-                    <TextBlock Text="Click the system tray icon to open the flyout" FontSize="12" Opacity="0.5" />
-                </StackPanel>
-                <ToggleSwitch x:Name="TrayIconSwitch" Grid.Column="2" HorizontalAlignment="Right" OnContent="" OffContent="" MinWidth="0" Toggled="TrayIconSwitch_Toggled" />
-            </Grid>
-        </Border>
-
-        <Border CornerRadius="4" Padding="16" Margin="0,0,0,4"
-                Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1">
-            <Grid>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="Auto" />
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="Auto" />
-                </Grid.ColumnDefinitions>
-                <FontIcon Grid.Column="0" Glyph="&#xE718;" Margin="0,0,16,0" />
-                <StackPanel Grid.Column="1">
-                    <TextBlock Text="Pin to Taskbar" FontSize="14" />
-                    <TextBlock Text="Pin a shortcut to the taskbar that opens the flyout" FontSize="12" Opacity="0.5" />
-                </StackPanel>
-                <Button Grid.Column="2" Content="Pin to Taskbar" Click="PinToTaskbar_Click" />
-            </Grid>
-        </Border>
     </StackPanel>
     </Grid>
     </ScrollViewer>

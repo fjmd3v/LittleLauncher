@@ -25,7 +25,6 @@ public partial class HomePage : Page
         LoadAppIcon();
         VersionTextBlock.Text = SettingsManager.Current.LastKnownVersion;
         BuildTypeTextBlock.Text = GetBuildTypeLabel();
-        TrayIconSwitch.IsOn = !SettingsManager.Current.NIconHide;
         _ = CheckForUpdateAsync();
     }
 
@@ -58,7 +57,9 @@ public partial class HomePage : Page
     /// </summary>
     private static string? ResolveAppIconSource()
     {
-        int mode = SettingsManager.Current.TrayIconMode;
+        var firstLauncher = SettingsManager.Current.Launchers.Count > 0
+            ? SettingsManager.Current.Launchers[0] : null;
+        int mode = firstLauncher?.TrayIconMode ?? 0;
 
         // Preset color icons (modes 0–5): load the source PNG directly
         string[] presetNames = ["Blue", "Green", "Teal", "Red", "Orange", "Purple"];
@@ -71,7 +72,7 @@ public partial class HomePage : Page
         // Custom icon (mode 12): load the user's original file
         if (mode == 12)
         {
-            string custom = SettingsManager.Current.CustomTrayIconPath;
+            string custom = firstLauncher?.CustomTrayIconPath ?? "";
             if (!string.IsNullOrEmpty(custom) && File.Exists(custom))
                 return custom;
         }
@@ -147,7 +148,7 @@ public partial class HomePage : Page
 
     private void LauncherItems_Click(object sender, PointerRoutedEventArgs e)
     {
-        SettingsWindow.GetCurrent()?.NavigateTo(typeof(LauncherItemsPage));
+        SettingsWindow.GetCurrent()?.NavigateTo(typeof(LaunchersPage));
     }
 
     private void SyncSettings_Click(object sender, PointerRoutedEventArgs e)
@@ -173,75 +174,5 @@ public partial class HomePage : Page
         }
     }
 
-    private void TrayIconSwitch_Toggled(object sender, RoutedEventArgs e)
-    {
-        bool show = TrayIconSwitch.IsOn;
-        SettingsManager.Current.NIconHide = !show;
-
-        if ((Application.Current as App)?.m_window is MainWindow mainWindow)
-            mainWindow.UpdateTrayIconVisibility(show);
-    }
-
-    private async void PinToTaskbar_Click(object sender, RoutedEventArgs e)
-    {
-        // Always use the companion exe pin flow. In MSIX mode, pinning via
-        // TaskbarManager pins the main app (which opens Settings on click),
-        // not the companion exe (which shows the flyout). The companion exe
-        // --pin mode keeps a process alive so the user can right-click and
-        // choose "Pin to taskbar".
-        LaunchCompanionPinMode();
-    }
-
-    private async void LaunchCompanionPinMode()
-    {
-        try
-        {
-            // Always use the AppData copy — EnsureFlyoutShortcut() keeps it
-            // current for all build types (WiX, MSIX, unpackaged).
-            string flyoutExe = Path.Combine(
-                MainWindow.GetPhysicalAppDataDir(), "LittleLauncherFlyout.exe");
-
-            if (!File.Exists(flyoutExe))
-            {
-                var dialog = new ContentDialog
-                {
-                    Title = "File Not Found",
-                    Content = "LittleLauncherFlyout.exe was not found in the application directory.",
-                    CloseButtonText = "OK",
-                    XamlRoot = this.XamlRoot
-                };
-                await dialog.ShowAsync();
-                return;
-            }
-
-            var process = Process.Start(new ProcessStartInfo
-            {
-                FileName = flyoutExe,
-                Arguments = "--pin",
-                UseShellExecute = true
-            });
-
-            // Wait for the pin dialog to close, then stamp the newly-created
-            // pinned .lnk with the current app-icon.ico so it doesn't show
-            // the exe's embedded Blue icon.
-            if (process != null)
-            {
-                await Task.Run(() => process.WaitForExit());
-                if (Application.Current is App { m_window: MainWindow mainWindow })
-                    mainWindow.UpdateShortcutIcons();
-            }
-        }
-        catch (Exception ex)
-        {
-            Logger.Error(ex, "Error launching flyout pin helper");
-            var dialog = new ContentDialog
-            {
-                Title = "Error",
-                Content = $"Failed to pin: {ex.Message}",
-                CloseButtonText = "OK",
-                XamlRoot = this.XamlRoot
-            };
-            await dialog.ShowAsync();
-        }
-    }
+    private void TrayIconSwitch_Toggled(object sender, RoutedEventArgs e) { }
 }

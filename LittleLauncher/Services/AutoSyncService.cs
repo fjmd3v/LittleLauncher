@@ -1,11 +1,10 @@
 using LittleLauncher.Classes.Settings;
-using LittleLauncher.Models;
 
 namespace LittleLauncher.Services;
 
 /// <summary>
-/// Manages automatic SFTP sync of launcher items.
-/// Handles: startup download, debounced upload on item changes, and periodic upload.
+/// Manages automatic SFTP sync of launchers.
+/// Handles: startup download, debounced upload on item changes, and periodic download.
 /// All triggers are gated by the SftpAutoSync toggle.
 /// </summary>
 public static class AutoSyncService
@@ -79,48 +78,32 @@ public static class AutoSyncService
     }
 
     /// <summary>
-    /// Run the startup sync: download launcher items from the server, and sync all shared groups.
+    /// Run the startup sync: download launchers from the server, then sync shared launchers.
     /// </summary>
     public static async Task SyncOnStartupAsync()
     {
-        // Main SFTP sync (if configured)
-        if (SettingsManager.Current.SftpAutoSync
-            && !string.IsNullOrWhiteSpace(SettingsManager.Current.SftpHost))
+        if (!SettingsManager.Current.SftpAutoSync
+            || string.IsNullOrWhiteSpace(SettingsManager.Current.SftpHost))
+            return;
+
+        try
         {
-            try
+            var (success, message) = await SftpSyncService.DownloadLaunchersAsync();
+            if (success)
             {
-                var (success, message) = await SftpSyncService.DownloadLauncherItemsAsync();
-                if (success)
-                {
-                    Logger.Info("Auto-sync startup: downloaded launcher items");
-                    Windows.FlyoutWindow.InvalidateItems();
-                }
-                else
-                    Logger.Warn($"Auto-sync startup skipped: {message}");
+                Logger.Info("Auto-sync startup: downloaded launchers");
+                Windows.FlyoutWindow.InvalidateItems();
+                MainWindow.Current?.RefreshTrayIcons();
             }
-            catch (Exception ex)
-            {
-                Logger.Error(ex, "Auto-sync startup failed");
-            }
+            else
+                Logger.Warn($"Auto-sync startup skipped: {message}");
+        }
+        catch (Exception ex)
+        {
+            Logger.Error(ex, "Auto-sync startup failed");
         }
 
-        // Shared group sync (always runs if there are any shared groups)
-        var sources = SettingsManager.Current.SharedGroupSources;
-        if (sources.Count > 0)
-        {
-            try
-            {
-                // Download subscribed groups first, then push owned groups
-                await SharedGroupSyncService.SyncAllIncomingAsync();
-                await SharedGroupSyncService.SyncAllOutgoingAsync();
-                if (sources.Any(s => !s.IsOwner))
-                    Windows.FlyoutWindow.InvalidateItems();
-            }
-            catch (Exception ex)
-            {
-                Logger.Error(ex, "Shared group startup sync failed");
-            }
-        }
+        await SyncSharedLaunchersSilentAsync("startup");
     }
 
     private static async Task UploadSilentAsync(string trigger)
@@ -131,9 +114,9 @@ public static class AutoSyncService
 
         try
         {
-            var (success, message) = await SftpSyncService.UploadLauncherItemsAsync();
+            var (success, message) = await SftpSyncService.UploadLaunchersAsync();
             if (success)
-                Logger.Info($"Auto-sync ({trigger}): uploaded launcher items");
+                Logger.Info($"Auto-sync ({trigger}): uploaded launchers");
             else
                 Logger.Warn($"Auto-sync ({trigger}) skipped: {message}");
         }
@@ -151,11 +134,15 @@ public static class AutoSyncService
 
         try
         {
-            var (success, message) = await SftpSyncService.DownloadLauncherItemsAsync();
+            var (success, message) = await SftpSyncService.DownloadLaunchersAsync();
             if (success)
             {
-                Logger.Info($"Auto-sync ({trigger}): downloaded launcher items");
-                Windows.FlyoutWindow.InvalidateItems();
+                Logger.Info($"Auto-sync ({trigger}): downloaded launchers");
+                App.MainDispatcherQueue.TryEnqueue(() =>
+                {
+                    Windows.FlyoutWindow.InvalidateItems();
+                    MainWindow.Current?.RefreshTrayIcons();
+                });
             }
             else
                 Logger.Warn($"Auto-sync ({trigger}) skipped: {message}");
@@ -165,25 +152,23 @@ public static class AutoSyncService
             Logger.Warn(ex, $"Auto-sync ({trigger}) failed");
         }
 
-        // Also sync incoming shared groups on the periodic timer
-        await SyncSharedGroupsSilentAsync(trigger);
+        await SyncSharedLaunchersSilentAsync(trigger);
     }
 
-    private static async Task SyncSharedGroupsSilentAsync(string trigger)
+    private static async Task SyncSharedLaunchersSilentAsync(string trigger)
     {
-        var sources = SettingsManager.Current.SharedGroupSources;
-        if (sources.Count == 0) return;
-
         try
         {
-            bool hadIncoming = sources.Any(s => !s.IsOwner);
-            await SharedGroupSyncService.SyncAllIncomingAsync();
-            if (hadIncoming)
+            await SftpSyncService.SyncAllSharedLaunchersAsync();
+            App.MainDispatcherQueue.TryEnqueue(() =>
+            {
                 Windows.FlyoutWindow.InvalidateItems();
+            });
+            Logger.Info($"Shared launcher sync ({trigger}): complete");
         }
         catch (Exception ex)
         {
-            Logger.Warn(ex, $"Shared group sync ({trigger}) failed");
+            Logger.Warn(ex, $"Shared launcher sync ({trigger}) failed");
         }
     }
 }

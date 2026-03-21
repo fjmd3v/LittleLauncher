@@ -1,6 +1,6 @@
 ---
 description: "Use when working with app icons, tray icons, shortcut icons, or window icons. Covers which icon files exist, where each icon surface pulls from, and how to update them correctly."
-applyTo: "**/MainWindow.xaml.cs,**/SettingsWindow.xaml.cs,**/SystemPage.xaml*,**/LauncherShortcut/**,**/HomePage.xaml.cs,**/FlyoutConverters.cs,**/FlyoutWindow.xaml*"
+applyTo: "**/MainWindow.xaml.cs,**/SettingsWindow.xaml.cs,**/LaunchersPage.xaml*,**/LauncherShortcut/**,**/HomePage.xaml.cs,**/FlyoutConverters.cs,**/FlyoutWindow.xaml*"
 ---
 
 # Icon System
@@ -11,20 +11,21 @@ Little Launcher uses a flat upright rocket as its identity icon. Users can chang
 
 | Surface | Source | User-configurable? |
 |---|---|---|
-| **System tray** | `ResolveTrayIcon()` → preset PNG, glyph, or custom image | Yes (`TrayIconMode`) |
-| **Pinned taskbar shortcut** | `app-icon.ico` in `<AppDataDir>` via `.lnk` IconLocation | Yes (follows `TrayIconMode`) |
-| **Settings window titlebar** | `settings-icon.ico` (app icon + gear overlay) | Yes (follows `TrayIconMode`) |
-| **Settings window taskbar entry** | `settings-icon.ico` via `WM_SETICON` + `AppWindow.SetIcon(IconId)` | Yes (follows `TrayIconMode`) |
-| **Settings window Alt-Tab** | `settings-icon.ico` via `AppWindow.SetIcon(IconId)` | Yes (follows `TrayIconMode`) |
-| **Start menu shortcut** | `app-icon.ico` via `GetShortcutIconLocation()` | Yes (follows `TrayIconMode`) |
+| **System tray (per launcher)** | `ResolveTrayIcon(Launcher)` → preset PNG, glyph, or custom image | Yes (`Launcher.TrayIconMode`) |
+| **Pinned taskbar shortcut** | `app-icon.ico` in `<AppDataDir>` via `.lnk` IconLocation | Yes (follows first launcher's `TrayIconMode`) |
+| **Settings window titlebar** | `settings-icon.ico` (first launcher's icon + gear overlay) | Yes (follows first launcher's `TrayIconMode`) |
+| **Settings window taskbar entry** | `settings-icon.ico` via `WM_SETICON` + `AppWindow.SetIcon(IconId)` | Yes (follows first launcher's `TrayIconMode`) |
+| **Settings window Alt-Tab** | `settings-icon.ico` via `AppWindow.SetIcon(IconId)` | Yes (follows first launcher's `TrayIconMode`) |
+| **Start menu shortcut** | `app-icon.ico` via `GetShortcutIconLocation()` | Yes (follows first launcher's `TrayIconMode`) |
 | **Exe embedded icon** | `Resources/LittleLauncher.ico` (compiled into exe) | No — always Blue rocket |
-| **Pin-to-taskbar dialog** | `app-icon.ico` loaded via `WM_SETICON` in companion exe | Yes (follows `TrayIconMode`) |
+| **Pin-to-taskbar dialog** | `app-icon.ico` loaded via `WM_SETICON` in companion exe | Yes (follows first launcher's `TrayIconMode`) |
 
 ## Key Files
 
 - **`Resources/LittleLauncher.ico`** — Multi-resolution Blue rocket (16–256px). Embedded into the exe at build time. This is the fallback icon for all surfaces. Generated from `Resources/AppIcons/Blue.png`.
 - **`Resources/AppIcons/*.png`** — Preset icon PNGs (Blue, Green, Teal, Red, Orange, Purple). Flat upright rockets stretched 20% horizontally for a wider profile. Copied to output at build time. Loaded at runtime by `ResolveBaseIconBitmap()`.
-- **`<AppDataDir>/app-icon.ico`** — Runtime-generated icon matching the current `TrayIconMode`. Written by `SaveResolvedIconToAppData()`. Used by shortcuts and window icons.
+- **`<AppDataDir>/app-icon-{launcherId}.ico`** — Per-launcher runtime icon. Written by `SaveResolvedIconToAppData(Launcher)`. The first launcher's icon is also copied to `app-icon.ico` by this method.
+- **`<AppDataDir>/app-icon.ico`** — Canonical icon for shortcuts (always mirrors first launcher's icon). Used by `.lnk` shortcuts and the Settings window.
 - **`<AppDataDir>/settings-icon.ico`** — Runtime-generated icon: the current app icon composited with a gear glyph overlay (dark circle + white gear in bottom-right corner). Written by `SaveSettingsIconToAppData()`. Used by the Settings window.
 - **`<AppDataDir>/LittleLauncherFlyout.exe`** — Copy of the companion exe deployed by `EnsureFlyoutShortcut()` for all build types. Pinning uses this copy.
 - **`<AppDataDir>/main-exe-path.txt`** — Breadcrumb file containing the main exe path. Read by the companion exe as a fallback when `FindWindow` fails.
@@ -54,13 +55,13 @@ Glyph presets (6–11) render in black (light theme) or white (dark theme) and u
 
 ## How Icon Updates Flow
 
-All icon surfaces derive from a single source of truth: `ResolveBaseIconBitmap()`, which returns a 256×256 `System.Drawing.Bitmap`.
+All icon surfaces derive from a single source of truth: `ResolveBaseIconBitmap(Launcher)`, which returns a 256×256 `System.Drawing.Bitmap`.
 
-1. User changes `TrayIconMode` in Settings → `OnTrayIconModeChanged` fires
-2. `ApplyTrayIconChange()` → `MainWindow.UpdateTrayIcon()`
-3. `UpdateTrayIcon()` calls `ResolveTrayIcon()` → `ResolveBaseIconBitmap()` → `BitmapToIcon()` → sets `nIcon.Icon`
-4. `UpdateTrayIcon()` calls `UpdateShortcutIcons()` → `SaveResolvedIconToAppData()` → `ResolveBaseIconBitmap()` → `BitmapToIcon()` → writes `app-icon.ico`
-5. `UpdateTrayIcon()` calls `SaveSettingsIconToAppData()` → `ResolveBaseIconBitmap()` → gear overlay → `BitmapToIcon()` → writes `settings-icon.ico`
+1. User changes `TrayIconMode` in LaunchersPage → `Launcher.PropertyChanged` fires
+2. `CreateTrayIconForLauncher` subscription → `MainWindow.UpdateTrayIcon(Launcher)`
+3. `UpdateTrayIcon(Launcher)` calls `ResolveTrayIcon(Launcher)` → `ResolveBaseIconBitmap(Launcher)` → `BitmapToIcon()` → updates that launcher's native tray icon
+4. `UpdateTrayIcon(Launcher)` calls `UpdateShortcutIcons()` → `SaveResolvedIconToAppData(Launcher)` → writes `app-icon-{id}.ico` (and `app-icon.ico` for first launcher)
+5. `UpdateTrayIcon(Launcher)` calls `SaveSettingsIconToAppData()` → first launcher's bitmap + gear overlay → `BitmapToIcon()` → writes `settings-icon.ico`
 6. `UpdateShortcutIcons()` updates pinned taskbar `.lnk` files that target `LittleLauncherFlyout.exe`
 7. `SettingsWindow.RefreshIcon()` reloads `settings-icon.ico` into titlebar, taskbar, and overlay
 
@@ -68,13 +69,13 @@ All icon surfaces derive from a single source of truth: `ResolveBaseIconBitmap()
 
 | Method | Purpose |
 |---|---|
-| `ResolveBaseIconBitmap()` | Single source of truth — returns 256×256 bitmap for any `TrayIconMode` |
+| `ResolveBaseIconBitmap(Launcher)` | Single source of truth — returns 256×256 bitmap for a launcher's `TrayIconMode` |
 | `RenderGlyphBitmap()` | Renders a Segoe Fluent Icons glyph to 256×256 bitmap (called by `ResolveBaseIconBitmap` for modes 6–11) |
 | `TrimAndResizeTo256()` | Trims transparent padding, centers on 256×256 canvas (called for presets + custom images) |
 | `BitmapToIcon()` | Converts a bitmap to multi-resolution ICO (16–256px) |
-| `ResolveTrayIcon()` | `ResolveBaseIconBitmap()` → `BitmapToIcon()` |
-| `SaveResolvedIconToAppData()` | `ResolveBaseIconBitmap()` → `BitmapToIcon()` → write file |
-| `SaveSettingsIconToAppData()` | `ResolveBaseIconBitmap()` → gear overlay → `BitmapToIcon()` → write file |
+| `ResolveTrayIcon(Launcher)` | `ResolveBaseIconBitmap(Launcher)` → `BitmapToIcon()` |
+| `SaveResolvedIconToAppData(Launcher)` | `ResolveBaseIconBitmap(Launcher)` → `BitmapToIcon()` → write `app-icon-{id}.ico`; copies to `app-icon.ico` for first launcher |
+| `SaveSettingsIconToAppData()` | First launcher's `ResolveBaseIconBitmap()` → gear overlay → `BitmapToIcon()` → write file |
 
 ## Settings Window Icon Strategy
 
@@ -102,10 +103,9 @@ The companion exe is deployed to `<AppDataDir>` by `EnsureFlyoutShortcut()` for 
 
 1. Add the PNG file to `Resources/AppIcons/` (transparent background, square)
 2. Add entry to `PresetIcons` dictionary in `MainWindow.xaml.cs` with the next mode number
-3. Add a `ComboBoxItem` with colored `Ellipse` + `TextBlock` in `SystemPage.xaml` (before `Custom...`)
-4. Bump the Custom mode number in: `ResolveBaseIconBitmap()`, `SystemPage.xaml.cs` (`UpdateCustomIconCardVisibility`), and `UserSettings.cs` (`OnCustomTrayIconPathChanged`)
+3. Add a `ComboBoxItem` with colored `Ellipse` + `TextBlock` in `LaunchersPage.xaml.cs` (`BuildIconModeCombo`)
+4. Bump the Custom mode number in: `ResolveBaseIconBitmap()` and `BuildCustomIconRow` in `LaunchersPage.xaml.cs`
 5. Add `<Content Include="Resources/AppIcons/NewColor.png">` to `.csproj` (or use the existing `*.png` glob)
-6. Update `TrayIconMode` comment in `UserSettings.cs`
 
 ## Regenerating `LittleLauncher.ico`
 

@@ -221,7 +221,35 @@ public static class NativeMethods
 
     #endregion
 
-    #region shell32.dll
+    #region shell32.dll — system tray (Shell_NotifyIcon)
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    internal struct NOTIFYICONDATA
+    {
+        public uint cbSize;
+        public IntPtr hWnd;
+        public uint uID;
+        public uint uFlags;
+        public uint uCallbackMessage;
+        public IntPtr hIcon;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)]
+        public string szTip;
+    }
+
+    internal const uint NIF_MESSAGE = 0x00000001;
+    internal const uint NIF_ICON    = 0x00000002;
+    internal const uint NIF_TIP     = 0x00000004;
+    internal const uint NIM_ADD     = 0x00000000;
+    internal const uint NIM_MODIFY  = 0x00000001;
+    internal const uint NIM_DELETE  = 0x00000002;
+
+    // Tray callback notification events (lParam values sent to uCallbackMessage handler)
+    internal const int WM_LBUTTONUP    = 0x0202;
+    internal const int WM_RBUTTONUP    = 0x0205;
+    internal const int WM_CONTEXTMENU  = 0x007B;
+
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
+    internal static extern bool Shell_NotifyIcon(uint dwMessage, ref NOTIFYICONDATA lpData);
 
     [DllImport("shell32.dll")]
     internal static extern void SHChangeNotify(uint wEventId, uint uFlags, IntPtr dwItem1, IntPtr dwItem2);
@@ -364,6 +392,13 @@ public static class NativeMethods
     [DllImport("ole32.dll")]
     internal static extern int PropVariantClear(IntPtr pvar);
 
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode, PreserveSig = true)]
+    internal static extern int SHGetPropertyStoreFromParsingName(
+        string pszPath, IntPtr pbc, int flags, ref Guid riid,
+        [MarshalAs(UnmanagedType.Interface)] out IPropertyStore ppv);
+
+    internal const int GPS_READWRITE = 2;
+
     /// <summary>
     /// Sets the AppUserModel.ID property on a specific HWND so the taskbar
     /// treats it as its own group, independent of the process exe.
@@ -417,6 +452,27 @@ public static class NativeMethods
         {
             PropVariantClear(pv);
             Marshal.FreeCoTaskMem(pv);
+        }
+    }
+
+    /// <summary>
+    /// Sets the AppUserModel.ID property on a .lnk shortcut file so the
+    /// shell can match a running process's AUMID to this shortcut when pinning.
+    /// </summary>
+    internal static void SetShortcutAppUserModelId(string lnkPath, string appId)
+    {
+        var IID_IPropertyStore = new Guid("886D8EEB-8CF2-4446-8D02-CDBA1DBDCF99");
+        int hr = SHGetPropertyStoreFromParsingName(lnkPath, IntPtr.Zero, GPS_READWRITE, ref IID_IPropertyStore, out var store);
+        if (hr != S_OK || store == null) return;
+
+        try
+        {
+            SetPropertyStoreString(store, PKEY_AppUserModel_ID, appId);
+            store.Commit();
+        }
+        finally
+        {
+            Marshal.ReleaseComObject(store);
         }
     }
 

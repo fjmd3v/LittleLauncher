@@ -1,6 +1,6 @@
 ---
-description: "Use when adding or modifying observable settings properties in UserSettings.cs, handling property change side-effects, or extending the serialized settings schema."
-applyTo: "**/ViewModels/UserSettings*.cs"
+description: "Use when adding or modifying observable settings properties in UserSettings.cs, Launcher model properties, handling property change side-effects, or extending the serialized settings schema."
+applyTo: "{**/ViewModels/UserSettings*.cs,**/Models/Launcher.cs}"
 ---
 
 # UserSettings Conventions
@@ -13,7 +13,7 @@ applyTo: "**/ViewModels/UserSettings*.cs"
    private bool _myNewFeature;
    ```
 2. CommunityToolkit.Mvvm generates `MyNewFeature` property + `OnMyNewFeatureChanged` partial method
-3. The property auto-serializes to XML via `XmlSerializer` — no extra config needed
+3. The property auto-serializes to JSON via `System.Text.Json` — no extra config needed
 
 ## Side-Effects
 
@@ -27,30 +27,47 @@ applyTo: "**/ViewModels/UserSettings*.cs"
   }
   ```
 
-## XML Serialization
+## JSON Serialization
 
-- Properties marked `[XmlIgnore]` are excluded from settings.xml
-- `ObservableCollection<T>` properties serialize as XML arrays
-- Default values in field initializers are used when the element is missing from XML
+- Properties marked `[JsonIgnore]` are excluded from settings.json
+- `ObservableCollection<T>` properties serialize as JSON arrays
+- Default values in field initializers are used when the property is missing from JSON
+- `DefaultIgnoreCondition = WhenWritingDefault` omits default-valued properties from the output
 - After deserialization, `CompleteInitialization()` is called to finalize state
 
 ## Non-Serialized Model Properties
 
-`LauncherItem.IsExpanded` is `[XmlIgnore]` (defaults `true`) — it tracks the group expand/collapse state in the settings UI but is not persisted to disk. It is a plain property (not `[ObservableProperty]`) since it doesn't need data binding or change notification.
+`LauncherItem.IsExpanded` is `[JsonIgnore]` (defaults `true`) — it tracks the group expand/collapse state in the settings UI but is not persisted to disk. It is a plain property (not `[ObservableProperty]`) since it doesn't need data binding or change notification.
+
+## Launchers Collection
+
+`UserSettings.Launchers` is an `ObservableCollection<Launcher>`. Each `Launcher` holds:
+- `Id` (GUID string, readonly key)
+- `Name` (`[ObservableProperty]`)
+- `TrayIconMode` (`[ObservableProperty]`, same mode values as the old global `TrayIconMode`)
+- `CustomTrayIconPath` (`[ObservableProperty]`)
+- `NIconHide` (`[ObservableProperty]`)
+- `Items: ObservableCollection<LauncherItem>`
+
+### Sharing Properties (plain auto-properties, not `[ObservableProperty]`)
+- `IsShared` (bool) — whether this launcher participates in sharing
+- `IsSharedOwner` (bool) — `true` = publisher, `false` = subscriber (read-only items)
+- `SharedSyncMode` (int) — 0 = File (local/network path), 1 = SFTP
+- `SharedPath` (string) — file path (local/UNC) or SFTP remote path depending on mode
+- `SharedSftpHost`, `SharedSftpPort` (int, default 22), `SharedSftpUsername`, `SharedSftpPrivateKeyPath` — SFTP connection fields (only used when `SharedSyncMode == 1`)
+- `SharedSftpRemotePath` — legacy migration-only setter that populates `SharedPath` + sets SFTP mode on deserialization
+- `IsFileSync`, `IsSftpSync` — `[JsonIgnore]` convenience properties derived from `SharedSyncMode`
+
+**Migration**: On first run with old settings, `CompleteInitialization()` checks `Launchers.Count == 0` and migrates `LauncherItems` + `TrayIconMode`/`NIconHide`/`CustomTrayIconPath` into a "Default" launcher. The legacy properties remain in the schema but are not observable. On first load, migrates from legacy `settings.xml` to `settings.json`.
+
+**Do not** add `[ObservableProperty]` to the legacy migration fields (`LauncherItems`, `TrayIconMode`, `NIconHide`, `CustomTrayIconPath` on `UserSettings`) — they are plain migration-only properties marked with `[JsonIgnore]`.
 
 ## Property Categories
 
 Group related properties together with comment headers matching existing style:
 - Appearance & Behaviour
 - Taskbar Widget
-- Launcher Items (includes `LauncherItems` collection and `SharedGroupSources`)
+- Launchers
 - SFTP Sync
 
-## SharedGroupSources
 
-`UserSettings.SharedGroupSources` is a `List<SharedGroupSource>` (not `ObservableCollection`). Each entry:
-- Links to a `LauncherItem` group via matching `SharedGroupSource.Id` ↔ `LauncherItem.SharedGroupId`.
-- `IsOwner = true` → this user publishes the group to a local file or SFTP path.
-- `IsOwner = false` → this user subscribes; group children are replaced on sync.
-
-When a shared group is removed from the launcher items, its `SharedGroupSource` must also be removed from this list (handled in `LauncherItemsPage.RemoveItem_Click`).

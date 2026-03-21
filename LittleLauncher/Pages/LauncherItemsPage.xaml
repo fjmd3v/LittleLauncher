@@ -13,6 +13,7 @@
             <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
                     BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
                     BorderThickness="1" CornerRadius="4" Padding="12" Margin="0,2"
+                    Loaded="ItemCard_Loaded"
                     PointerEntered="ItemCard_PointerEntered" PointerExited="ItemCard_PointerExited">
                 <Grid ColumnSpacing="12">
                     <Grid.ColumnDefinitions>
@@ -64,6 +65,7 @@
             <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
                     BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
                     BorderThickness="1" CornerRadius="4" Padding="12" Margin="0,2"
+                    Loaded="ItemCard_Loaded"
                     PointerEntered="ItemCard_PointerEntered" PointerExited="ItemCard_PointerExited">
                 <Grid ColumnSpacing="12">
                     <Grid.ColumnDefinitions>
@@ -102,6 +104,7 @@
             <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
                     BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
                     BorderThickness="1" CornerRadius="4" Margin="0,2"
+                    Loaded="ItemCard_Loaded"
                     PointerEntered="ItemCard_PointerEntered" PointerExited="ItemCard_PointerExited">
                 <StackPanel Tag="GroupRoot" Loaded="GroupRoot_Loaded">
                     <Grid ColumnSpacing="8" Padding="12,10">
@@ -128,10 +131,6 @@
                             <Button Click="MoveItemDown_Click" Tag="{Binding}"
                                     ToolTipService.ToolTip="Move down" Padding="6,5">
                                 <FontIcon Glyph="&#xE70D;" FontSize="12"/>
-                            </Button>
-                            <Button Click="ShareGroupSetup_Click" Tag="{Binding}"
-                                    ToolTipService.ToolTip="Share this group" Padding="6,5">
-                                <FontIcon Glyph="&#xE72D;" FontSize="12"/>
                             </Button>
                             <Button Click="EditItem_Click" Tag="{Binding}"
                                     ToolTipService.ToolTip="Edit" Padding="6,5">
@@ -178,193 +177,9 @@
         <pages:LauncherItemTemplateSelector x:Key="ItemTemplateSelector"
             LauncherItemTemplate="{StaticResource LauncherItemTemplate}"
             ColumnBreakItemTemplate="{StaticResource ColumnBreakItemTemplate}"
-            GroupItemTemplate="{StaticResource GroupItemTemplate}"
-            SharedGroupOwnerTemplate="{StaticResource SharedGroupOwnerTemplate}"
-            SharedGroupSubscriberTemplate="{StaticResource SharedGroupSubscriberTemplate}"/>
+            GroupItemTemplate="{StaticResource GroupItemTemplate}"/>
 
-        <!-- Read-only templates for children inside subscribed groups -->
-        <DataTemplate x:Key="ReadOnlyLauncherItemTemplate">
-            <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                    BorderThickness="1" CornerRadius="4" Padding="12" Margin="0,2">
-                <Grid ColumnSpacing="12">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="Auto"/>
-                        <ColumnDefinition Width="*"/>
-                    </Grid.ColumnDefinitions>
-                    <Grid Grid.Column="0" Width="24" Height="24" VerticalAlignment="Center">
-                        <Image Source="{Binding IconPath, Converter={StaticResource IconPathToImage}}"
-                               Visibility="{Binding IconPath, Converter={StaticResource IconPathToVisibility}}"
-                               Width="24" Height="24" />
-                        <FontIcon Glyph="{Binding IconGlyph}"
-                                  Visibility="{Binding IconPath, Converter={StaticResource IconPathToVisibility}, ConverterParameter=invert}"
-                                  FontSize="20" />
-                    </Grid>
-                    <TextBlock Grid.Column="1" Text="{Binding Name}" FontWeight="Medium" FontSize="14"
-                               VerticalAlignment="Center" TextTrimming="CharacterEllipsis" Opacity="0.9"/>
-                </Grid>
-            </Border>
-        </DataTemplate>
 
-        <pages:ReadOnlyItemTemplateSelector x:Key="ReadOnlyItemTemplateSelector"
-            LauncherItemTemplate="{StaticResource ReadOnlyLauncherItemTemplate}"/>
-
-        <!-- Template for an owned shared group (user is the publisher) -->
-        <DataTemplate x:Key="SharedGroupOwnerTemplate">
-            <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                    BorderThickness="1" CornerRadius="4" Margin="0,2"
-                    PointerEntered="ItemCard_PointerEntered" PointerExited="ItemCard_PointerExited">
-                <StackPanel Tag="GroupRoot" Loaded="GroupRoot_Loaded">
-                    <Grid ColumnSpacing="8" Padding="12,10">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="Auto"/>
-                            <ColumnDefinition Width="Auto"/>
-                            <ColumnDefinition Width="*"/>
-                            <ColumnDefinition Width="Auto"/>
-                        </Grid.ColumnDefinitions>
-                        <FontIcon Grid.Column="0" Glyph="&#xE700;" FontSize="12" Opacity="0.3" VerticalAlignment="Center"
-                                  ToolTipService.ToolTip="Drag to reorder"/>
-                        <Button Grid.Column="1" Click="ToggleGroupExpand_Click"
-                                Padding="4" Background="Transparent" BorderThickness="0"
-                                VerticalAlignment="Center">
-                            <FontIcon Glyph="&#xE70D;" FontSize="12" Opacity="0.6"/>
-                        </Button>
-                        <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-                            <TextBlock Text="{Binding Name}" FontWeight="SemiBold" FontSize="14" VerticalAlignment="Center"/>
-                            <Border Background="{ThemeResource AccentFillColorDefaultBrush}" CornerRadius="10" Padding="7,2">
-                                <StackPanel Orientation="Horizontal" Spacing="4">
-                                    <FontIcon Glyph="&#xE753;" FontSize="10" Foreground="White"/>
-                                    <TextBlock Text="Shared" FontSize="11" Foreground="White" FontWeight="SemiBold"/>
-                                </StackPanel>
-                            </Border>
-                        </StackPanel>
-                        <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center" Spacing="4"
-                                    PointerEntered="ItemButtons_PointerEntered" PointerExited="ItemButtons_PointerExited">
-                            <Button Click="SyncSharedGroup_Click" Tag="{Binding}"
-                                    ToolTipService.ToolTip="Sync now" Padding="6,5">
-                                <FontIcon Glyph="&#xE895;" FontSize="12"/>
-                            </Button>
-                            <Button Click="MoveItemUp_Click" Tag="{Binding}"
-                                    ToolTipService.ToolTip="Move up" Padding="6,5">
-                                <FontIcon Glyph="&#xE70E;" FontSize="12"/>
-                            </Button>
-                            <Button Click="MoveItemDown_Click" Tag="{Binding}"
-                                    ToolTipService.ToolTip="Move down" Padding="6,5">
-                                <FontIcon Glyph="&#xE70D;" FontSize="12"/>
-                            </Button>
-                            <Button Click="EditItem_Click" Tag="{Binding}"
-                                    ToolTipService.ToolTip="Edit / sharing settings" Padding="6,5">
-                                <FontIcon Glyph="&#xE70F;" FontSize="12"/>
-                            </Button>
-                            <Button Click="RemoveItem_Click" Tag="{Binding}"
-                                    ToolTipService.ToolTip="Remove" Padding="6,5">
-                                <FontIcon Glyph="&#xE74D;" FontSize="12"/>
-                            </Button>
-                        </StackPanel>
-                    </Grid>
-                    <StackPanel Tag="GroupChildren" Margin="24,0,0,0">
-                        <ListView ItemsSource="{Binding Children}"
-                                  Tag="{Binding}"
-                                  CanDragItems="True" AllowDrop="True"
-                                  SelectionMode="None"
-                                  ItemTemplateSelector="{StaticResource ItemTemplateSelector}"
-                                  DragItemsStarting="GroupChildList_DragItemsStarting"
-                                  DragOver="GroupChildList_DragOver"
-                                  DragLeave="GroupChildList_DragLeave"
-                                  Drop="GroupChildList_Drop"
-                                  DragItemsCompleted="GroupChildList_DragItemsCompleted">
-                            <ListView.ItemContainerStyle>
-                                <Style TargetType="ListViewItem">
-                                    <Setter Property="Padding" Value="0"/>
-                                    <Setter Property="Margin" Value="0"/>
-                                    <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
-                                </Style>
-                            </ListView.ItemContainerStyle>
-                        </ListView>
-                        <StackPanel Orientation="Horizontal" Spacing="8" Margin="12,8">
-                            <Button Click="ShowAddItemToGroup_Click" Tag="{Binding}">
-                                <StackPanel Orientation="Horizontal" Spacing="8">
-                                    <FontIcon Glyph="&#xE710;" FontSize="14"/>
-                                    <TextBlock Text="Add Item"/>
-                                </StackPanel>
-                            </Button>
-                        </StackPanel>
-                    </StackPanel>
-                </StackPanel>
-            </Border>
-        </DataTemplate>
-
-        <!-- Template for a subscribed shared group (read-only — user is a consumer) -->
-        <DataTemplate x:Key="SharedGroupSubscriberTemplate">
-            <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                    BorderThickness="1" CornerRadius="4" Margin="0,2"
-                    PointerEntered="ItemCard_PointerEntered" PointerExited="ItemCard_PointerExited">
-                <StackPanel Tag="GroupRoot" Loaded="GroupRoot_Loaded">
-                    <Grid ColumnSpacing="8" Padding="12,10">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="Auto"/>
-                            <ColumnDefinition Width="Auto"/>
-                            <ColumnDefinition Width="*"/>
-                            <ColumnDefinition Width="Auto"/>
-                        </Grid.ColumnDefinitions>
-                        <FontIcon Grid.Column="0" Glyph="&#xE700;" FontSize="12" Opacity="0.3" VerticalAlignment="Center"
-                                  ToolTipService.ToolTip="Drag to reorder"/>
-                        <Button Grid.Column="1" Click="ToggleGroupExpand_Click"
-                                Padding="4" Background="Transparent" BorderThickness="0"
-                                VerticalAlignment="Center">
-                            <FontIcon Glyph="&#xE70D;" FontSize="12" Opacity="0.6"/>
-                        </Button>
-                        <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-                            <TextBlock Text="{Binding Name}" FontWeight="SemiBold" FontSize="14" VerticalAlignment="Center"/>
-                            <Border BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="10" Padding="7,2">
-                                <StackPanel Orientation="Horizontal" Spacing="4">
-                                    <FontIcon Glyph="&#xE72E;" FontSize="10" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
-                                    <TextBlock Text="Subscribed" FontSize="11"
-                                               Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                               FontWeight="SemiBold"/>
-                                </StackPanel>
-                            </Border>
-                        </StackPanel>
-                        <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center" Spacing="4"
-                                    PointerEntered="ItemButtons_PointerEntered" PointerExited="ItemButtons_PointerExited">
-                            <Button Click="SyncSharedGroup_Click" Tag="{Binding}"
-                                    ToolTipService.ToolTip="Sync now" Padding="6,5">
-                                <FontIcon Glyph="&#xE895;" FontSize="12"/>
-                            </Button>
-                            <Button Click="MoveItemUp_Click" Tag="{Binding}"
-                                    ToolTipService.ToolTip="Move up" Padding="6,5">
-                                <FontIcon Glyph="&#xE70E;" FontSize="12"/>
-                            </Button>
-                            <Button Click="MoveItemDown_Click" Tag="{Binding}"
-                                    ToolTipService.ToolTip="Move down" Padding="6,5">
-                                <FontIcon Glyph="&#xE70D;" FontSize="12"/>
-                            </Button>
-                            <Button Click="RemoveItem_Click" Tag="{Binding}"
-                                    ToolTipService.ToolTip="Remove" Padding="6,5">
-                                <FontIcon Glyph="&#xE74D;" FontSize="12"/>
-                            </Button>
-                        </StackPanel>
-                    </Grid>
-                    <StackPanel Tag="GroupChildren" Margin="24,0,0,8">
-                        <ListView ItemsSource="{Binding Children}"
-                                  CanDragItems="False" AllowDrop="False"
-                                  SelectionMode="None"
-                                  ItemTemplateSelector="{StaticResource ReadOnlyItemTemplateSelector}">
-                            <ListView.ItemContainerStyle>
-                                <Style TargetType="ListViewItem">
-                                    <Setter Property="Padding" Value="0"/>
-                                    <Setter Property="Margin" Value="0"/>
-                                    <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
-                                    <Setter Property="IsHitTestVisible" Value="False"/>
-                                </Style>
-                            </ListView.ItemContainerStyle>
-                        </ListView>
-                    </StackPanel>
-                </StackPanel>
-            </Border>
-        </DataTemplate>
     </Page.Resources>
 
     <!--
@@ -381,8 +196,18 @@
 
         <!-- Row 0: Page header -->
         <StackPanel Grid.Row="0">
-            <TextBlock Text="Launcher Items" FontSize="24" FontWeight="SemiBold" Margin="0,0,0,8"/>
-            <TextBlock Text="Add, edit, or remove apps and websites from your little launcher. Drag items to reorder."
+            <!-- Breadcrumb: ← Launchers › Launcher Name -->
+            <StackPanel Orientation="Horizontal" Margin="0,0,0,2" VerticalAlignment="Center">
+                <HyperlinkButton x:Name="BackToLaunchersButton" Padding="0,2,4,2" Click="BackToLayouts_Click">
+                    <StackPanel Orientation="Horizontal" Spacing="4">
+                        <FontIcon Glyph="&#xE76B;" FontSize="12" VerticalAlignment="Center"/>
+                        <TextBlock Text="Launchers" VerticalAlignment="Center"/>
+                    </StackPanel>
+                </HyperlinkButton>
+                <TextBlock Text="›" VerticalAlignment="Center" Opacity="0.4" Margin="2,1,6,0" FontSize="16"/>
+                <TextBlock x:Name="LauncherNameCrumb" VerticalAlignment="Center" Opacity="0.7" FontSize="14"/>
+            </StackPanel>
+            <TextBlock x:Name="PageSubtitle" Text="Add, edit, or remove apps and websites from your little launcher. Drag items to reorder."
                        FontSize="14" Opacity="0.6" Margin="0,0,0,16"/>
         </StackPanel>
 
@@ -423,7 +248,7 @@
                            HorizontalAlignment="Center" VerticalAlignment="Center"/>
             </Border>
 
-            <Grid Margin="0,8,0,0">
+            <Grid x:Name="AddButtonsToolbar" Margin="0,8,0,0">
                 <StackPanel Orientation="Horizontal" Spacing="8" FlowDirection="LeftToRight">
                     <Button Style="{ThemeResource AccentButtonStyle}" Click="ShowAddDialog_Click">
                         <StackPanel Orientation="Horizontal" Spacing="8">
@@ -443,19 +268,13 @@
                             <TextBlock Text="Add Column Break"/>
                         </StackPanel>
                     </Button>
-                    <Button Click="ShowAddSharedGroupDialog_Click">
-                        <StackPanel Orientation="Horizontal" Spacing="8">
-                            <FontIcon Glyph="&#xE753;" FontSize="14"/>
-                            <TextBlock Text="Add Shared Group"/>
-                        </StackPanel>
-                    </Button>
                 </StackPanel>
             </Grid>
 
             <TextBlock Text="Backup" FontSize="14" FontWeight="SemiBold" Margin="0,20,0,6"/>
             <StackPanel Orientation="Horizontal" Spacing="8">
                 <Button Content="Export Items..." Click="ExportItems_Click"/>
-                <Button Content="Import Items..." Click="ImportItems_Click"/>
+                <Button x:Name="ImportButton" Content="Import Items..." Click="ImportItems_Click"/>
             </StackPanel>
         </StackPanel>
     </Grid>

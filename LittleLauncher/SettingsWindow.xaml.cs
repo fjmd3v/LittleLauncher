@@ -6,8 +6,10 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Imaging;
 using Microsoft.UI.Windowing;
+using System.Linq;
 using WinRT.Interop;
 using static LittleLauncher.Classes.NativeMethods;
+using Launcher = LittleLauncher.Models.Launcher;
 
 namespace LittleLauncher;
 
@@ -67,7 +69,20 @@ public sealed partial class SettingsWindow : Window
         LoadTitleBarIcon(iconPath);
         uint dpi = GetDpiForWindow(hwnd);
         double scale = dpi / 96.0;
-        appWindow.Resize(new global::Windows.Graphics.SizeInt32((int)(900 * scale), (int)(700 * scale)));
+        int width = (int)(900 * scale);
+        int height = (int)(700 * scale);
+        appWindow.Resize(new global::Windows.Graphics.SizeInt32(width, height));
+
+        // Center on the monitor nearest the cursor
+        GetCursorPos(out var cursorPt);
+        var monitor = MonitorFromPoint(cursorPt, MONITOR_DEFAULTTONEAREST);
+        var mi = new MONITORINFOEX { cbSize = System.Runtime.InteropServices.Marshal.SizeOf<MONITORINFOEX>() };
+        if (GetMonitorInfo(monitor, ref mi))
+        {
+            int cx = mi.rcWork.Left + (mi.rcWork.Right - mi.rcWork.Left - width) / 2;
+            int cy = mi.rcWork.Top + (mi.rcWork.Bottom - mi.rcWork.Top - height) / 2;
+            appWindow.Move(new global::Windows.Graphics.PointInt32(cx, cy));
+        }
 
         // Navigate to home
         RootNavigation.SelectedItem = RootNavigation.MenuItems[0];
@@ -235,21 +250,28 @@ public sealed partial class SettingsWindow : Window
 
     private void RootNavigation_SelectionChanged(NavigationView sender, NavigationViewSelectionChangedEventArgs args)
     {
+        Type? pageType = null;
         if (args.IsSettingsSelected)
         {
-            ContentFrame.Navigate(typeof(SystemPage));
+            pageType = typeof(SystemPage);
         }
         else if (args.SelectedItem is NavigationViewItem item && item.Tag is string tag)
         {
-            var pageType = GetPageTypeFromTag(tag);
-            if (pageType != null)
-                ContentFrame.Navigate(pageType);
+            pageType = GetPageTypeFromTag(tag);
         }
+
+        if (pageType == null) return;
+
+        // Don't re-navigate if we're already on this page type
+        if (ContentFrame.Content?.GetType() == pageType) return;
+
+        ContentFrame.Navigate(pageType);
     }
 
     private static Type? GetPageTypeFromTag(string tag) => tag switch
     {
         "HomePage" => typeof(HomePage),
+        "LaunchersPage" => typeof(LaunchersPage),
         "LauncherItemsPage" => typeof(LauncherItemsPage),
         "SyncPage" => typeof(SyncPage),
         "SystemPage" => typeof(SystemPage),
@@ -257,8 +279,29 @@ public sealed partial class SettingsWindow : Window
         _ => null
     };
 
+    /// <summary>
+    /// Navigate the content frame to the LauncherItemsPage for a specific launcher.
+    /// The Launchers nav item stays selected.
+    /// </summary>
+    public void NavigateToLauncherItems(Launcher launcher)
+    {
+        LauncherItemsPage.TargetLauncher = launcher;
+        ContentFrame.Navigate(typeof(LauncherItemsPage));
+        // Keep "Launchers" selected in the nav pane
+        foreach (var item in RootNavigation.MenuItems.OfType<NavigationViewItem>())
+        {
+            if (item.Tag as string == "LaunchersPage")
+            {
+                RootNavigation.SelectedItem = item;
+                break;
+            }
+        }
+    }
+
     private void SettingsWindow_Closed(object sender, WindowEventArgs e)
     {
         SettingsManager.SaveSettings();
+        // Refresh tray icons in case launchers were added, removed, or renamed
+        MainWindow.Current?.RefreshTrayIcons();
     }
 }

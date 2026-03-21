@@ -1,6 +1,6 @@
 using CommunityToolkit.Mvvm.ComponentModel;
 using System.Collections.ObjectModel;
-using System.Xml.Serialization;
+using System.Text.Json.Serialization;
 
 namespace LittleLauncher.Models;
 
@@ -81,13 +81,6 @@ public partial class LauncherItem : ObservableObject
     public partial bool IsGroup { get; set; }
 
     /// <summary>
-    /// ID of the <see cref="LittleLauncher.Models.SharedGroupSource"/> this group is linked to.
-    /// Empty string for normal (unshared) groups. Only meaningful when <see cref="IsGroup"/> is true.
-    /// </summary>
-    [ObservableProperty]
-    public partial string SharedGroupId { get; set; }
-
-    /// <summary>
     /// Whether this item is a column break. Column breaks split the flyout into multiple
     /// side-by-side columns. Not launchable — purely a structural divider.
     /// </summary>
@@ -98,7 +91,7 @@ public partial class LauncherItem : ObservableObject
     /// Whether this group is currently expanded in the settings UI.
     /// Not serialized — purely transient UI state.
     /// </summary>
-    [XmlIgnore]
+    [JsonIgnore]
     public bool IsExpanded { get; set; } = true;
 
     /// <summary>
@@ -120,7 +113,6 @@ public partial class LauncherItem : ObservableObject
         IsPwa = false;
         IsGroup = false;
         IsColumnBreak = false;
-        SharedGroupId = string.Empty;
     }
 
     public LauncherItem(string name, string path, string iconGlyph, bool isWebsite = false, string arguments = "", string iconPath = "", bool openInAppWindow = false)
@@ -137,7 +129,6 @@ public partial class LauncherItem : ObservableObject
         IsPwa = false;
         IsGroup = false;
         IsColumnBreak = false;
-        SharedGroupId = string.Empty;
     }
 
     /// <summary>

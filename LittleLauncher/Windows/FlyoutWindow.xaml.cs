@@ -3,6 +3,7 @@ using LittleLauncher.Classes.Settings;
 using LittleLauncher.Models;
 using LittleLauncher.Pages;
 using LittleLauncher.Services;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
@@ -19,6 +20,7 @@ using Microsoft.UI.Windowing;
 using Microsoft.UI;
 using WinRT.Interop;
 using static LittleLauncher.Classes.NativeMethods;
+using Launcher = LittleLauncher.Models.Launcher;
 
 namespace LittleLauncher.Windows;
 
@@ -29,7 +31,10 @@ public partial class FlyoutWindow : Window
     private static readonly NLog.Logger Logger = NLog.LogManager.GetCurrentClassLogger();
     private static readonly object BoundsFileLock = new();
     private static readonly ConcurrentDictionary<string, WindowBounds> CachedBounds = new(StringComparer.OrdinalIgnoreCase);
-    private static FlyoutWindow? _instance;
+
+    /// <summary>Per-launcher flyout window instances (key = Launcher.Id).</summary>
+    private static readonly Dictionary<string, FlyoutWindow> _instances = new();
+
     private DateTime _lastDismissed = DateTime.MinValue;
     private bool _toolWindowStyleApplied;
     private int _lastItemsHash;
@@ -37,10 +42,12 @@ public partial class FlyoutWindow : Window
     private IntPtr _hwnd;
     private SUBCLASSPROC? _wndProcDelegate;
     private bool _isShowing;
+    private readonly Launcher _launcher;  // The launcher this window displays
 
-    private FlyoutWindow(MainWindow owner)
+    private FlyoutWindow(MainWindow owner, Launcher launcher)
     {
         _owner = owner;
+        _launcher = launcher;
         InitializeComponent();
         _hwnd = WindowNative.GetWindowHandle(this);
 
@@ -93,71 +100,96 @@ public partial class FlyoutWindow : Window
         return DefSubclassProc(hwnd, msg, wParam, lParam);
     }
 
-    internal static FlyoutWindow? GetCurrent() => _instance;
-
-    public static void Toggle(MainWindow owner, int screenX, int screenY)
+    internal static FlyoutWindow? GetCurrent(string? launcherId = null)
     {
-        if (_instance != null && _instance._hwnd != IntPtr.Zero && IsWindow(_instance._hwnd))
+        if (launcherId != null)
+            return _instances.TryGetValue(launcherId, out var fw) ? fw : null;
+        return _instances.Values.FirstOrDefault();
+    }
+
+    public static void Toggle(MainWindow owner, int screenX, int screenY, string launcherId)
+    {
+        if (!_instances.TryGetValue(launcherId, out var instance) || instance == null)
         {
-            if (GetWindowLong(_instance._hwnd, GWL_STYLE) != 0 &&
-                (GetWindowLong(_instance._hwnd, GWL_STYLE) & WS_VISIBLE) != 0)
+            // Find the launcher
+            var launcher = SettingsManager.Current.Launchers.FirstOrDefault(l => l.Id == launcherId);
+            if (launcher == null) return;
+            instance = new FlyoutWindow(owner, launcher);
+            _instances[launcherId] = instance;
+        }
+
+        if (instance._hwnd != IntPtr.Zero && IsWindow(instance._hwnd))
+        {
+            if (GetWindowLong(instance._hwnd, GWL_STYLE) != 0 &&
+                (GetWindowLong(instance._hwnd, GWL_STYLE) & WS_VISIBLE) != 0)
             {
-                _instance.HideFlyout();
+                instance.HideFlyout();
                 return;
             }
         }
 
-        if (_instance != null && (DateTime.UtcNow - _instance._lastDismissed).TotalMilliseconds < 300)
+        if ((DateTime.UtcNow - instance._lastDismissed).TotalMilliseconds < 300)
             return;
 
-        if (_instance == null || _instance._hwnd == IntPtr.Zero)
-            _instance = new FlyoutWindow(owner);
-
-        _instance._owner = owner;
-        _instance.RebuildItemsIfNeeded();
+        instance._owner = owner;
+        instance.RebuildItemsIfNeeded();
 
         // Calculate DPI-aware dimensions
-        double dpiScale = GetDpiForWindow(_instance._hwnd) / 96.0;
+        double dpiScale = GetDpiForWindow(instance._hwnd) / 96.0;
         if (dpiScale <= 0) dpiScale = 1.0;
-        int columnCount = Math.Max(1, _instance.ColumnsPanel.Children.Count);
+        int columnCount = Math.Max(1, instance.ColumnsPanel.Children.Count);
         int flyoutWidthPx = (int)(ColumnWidth * columnCount * dpiScale);
-        int flyoutHeightPx = (int)Math.Ceiling(_instance.MeasureContentHeight() * dpiScale);
+        int flyoutHeightPx = (int)Math.Ceiling(instance.MeasureContentHeight() * dpiScale);
 
         // Position off-screen first, then show
-        _instance._isShowing = true;
-        var appWindow = _instance.GetAppWindow();
+        instance._isShowing = true;
+        var appWindow = instance.GetAppWindow();
         appWindow.Resize(new global::Windows.Graphics.SizeInt32(flyoutWidthPx, flyoutHeightPx));
-        ShowWindow(_instance._hwnd, SW_SHOWNOACTIVATE);
-        SetForegroundWindow(_instance._hwnd);
-        SetFocus(_instance._hwnd);
+        ShowWindow(instance._hwnd, SW_SHOWNOACTIVATE);
+        SetForegroundWindow(instance._hwnd);
+        SetFocus(instance._hwnd);
 
-        if (!_instance._toolWindowStyleApplied)
+        if (!instance._toolWindowStyleApplied)
         {
-            int exStyle = GetWindowLong(_instance._hwnd, GWL_EXSTYLE);
-            SetWindowLong(_instance._hwnd, GWL_EXSTYLE, exStyle | WS_EX_TOOLWINDOW);
-            _instance._toolWindowStyleApplied = true;
+            int exStyle = GetWindowLong(instance._hwnd, GWL_EXSTYLE);
+            SetWindowLong(instance._hwnd, GWL_EXSTYLE, exStyle | WS_EX_TOOLWINDOW);
+            instance._toolWindowStyleApplied = true;
         }
 
-        _instance.PositionAt(screenX, screenY);
-        _instance._isShowing = false;
+        instance.PositionAt(screenX, screenY);
+        instance._isShowing = false;
     }
 
     public static void DismissIfOpen()
     {
-        _instance?.HideFlyout();
+        foreach (var fw in _instances.Values)
+            fw.HideFlyout();
     }
 
-    public static void WarmUp(MainWindow owner)
+    public static void WarmUp(MainWindow owner, IEnumerable<Launcher> launchers)
     {
-        if (_instance == null)
+        foreach (var launcher in launchers)
         {
-            _instance = new FlyoutWindow(owner);
-            _instance._lastItemsHash = ComputeItemsHash();
-            // Apply tool window style and hide
-            int exStyle = GetWindowLong(_instance._hwnd, GWL_EXSTYLE);
-            SetWindowLong(_instance._hwnd, GWL_EXSTYLE, exStyle | WS_EX_TOOLWINDOW);
-            _instance._toolWindowStyleApplied = true;
-            ShowWindow(_instance._hwnd, SW_HIDE);
+            if (!_instances.ContainsKey(launcher.Id))
+            {
+                var fw = new FlyoutWindow(owner, launcher);
+                fw._lastItemsHash = ComputeItemsHash(launcher);
+                int exStyle = GetWindowLong(fw._hwnd, GWL_EXSTYLE);
+                SetWindowLong(fw._hwnd, GWL_EXSTYLE, exStyle | WS_EX_TOOLWINDOW);
+                fw._toolWindowStyleApplied = true;
+                ShowWindow(fw._hwnd, SW_HIDE);
+                _instances[launcher.Id] = fw;
+            }
+        }
+    }
+
+    /// <summary>Destroys the flyout instance for a launcher that has been deleted.</summary>
+    public static void DisposeLauncher(string launcherId)
+    {
+        if (_instances.TryGetValue(launcherId, out var fw))
+        {
+            fw.Close();
+            _instances.Remove(launcherId);
         }
     }
 
@@ -174,9 +206,9 @@ public partial class FlyoutWindow : Window
 
     // ── Content ─────────────────────────────────────────────────────
 
-    private static int ComputeItemsHash()
+    private static int ComputeItemsHash(Launcher launcher)
     {
-        var items = SettingsManager.Current.LauncherItems;
+        var items = launcher.Items;
         if (items == null || items.Count == 0) return 0;
         var hash = new HashCode();
         foreach (var item in items)
@@ -217,7 +249,7 @@ public partial class FlyoutWindow : Window
         var current = new ObservableCollection<LauncherItem>();
         columns.Add(current);
 
-        foreach (var item in SettingsManager.Current.LauncherItems)
+        foreach (var item in _launcher.Items)
         {
             if (item.IsColumnBreak)
             {
@@ -270,7 +302,7 @@ public partial class FlyoutWindow : Window
 
     private void RebuildItemsIfNeeded()
     {
-        int currentHash = ComputeItemsHash();
+        int currentHash = ComputeItemsHash(_launcher);
         if (currentHash != _lastItemsHash)
         {
             _lastItemsHash = currentHash;
@@ -279,17 +311,31 @@ public partial class FlyoutWindow : Window
     }
 
     /// <summary>
-    /// Resets the cached items hash so the next Toggle() forces a full re-bind.
+    /// Resets the cached items hash for a specific launcher so the next Toggle forces a full re-bind.
     /// Call after import, sync download, or any bulk item change.
     /// </summary>
-    internal static void InvalidateItems()
+    internal static void InvalidateItems(string? launcherId = null)
     {
-        if (_instance != null)
+        if (launcherId != null)
         {
-            _instance._lastItemsHash = -1;
-            _instance.RebuildItemsIfNeeded();
+            if (_instances.TryGetValue(launcherId, out var fw))
+            {
+                fw._lastItemsHash = -1;
+                fw.RebuildItemsIfNeeded();
+            }
+        }
+        else
+        {
+            foreach (var fw in _instances.Values)
+            {
+                fw._lastItemsHash = -1;
+                fw.RebuildItemsIfNeeded();
+            }
         }
     }
+
+    /// <summary>Invalidates all launcher flyout instances.</summary>
+    internal static void InvalidateAllItems() => InvalidateItems(null);
 
 
 
@@ -733,7 +779,10 @@ public partial class FlyoutWindow : Window
         HideFlyout();
         _lastDismissed = DateTime.UtcNow;
         if (_owner != null)
+        {
+            LauncherItemsPage.TargetLauncher = _launcher;
             SettingsWindow.NavigateToEditItem(item, _owner);
+        }
     }
 
     private void ContextSettingsItem_Click(object sender, RoutedEventArgs e)
@@ -761,7 +810,7 @@ public partial class FlyoutWindow : Window
         const double groupHeight = 33;
         const double listPadding = 12;     // ListView Padding="8,6,8,6" → 6+6
 
-        var items = SettingsManager.Current.LauncherItems;
+        var items = _launcher.Items;
         if (items == null) return _lastMeasuredHeight;
 
         // Compute the height of each column and take the tallest.

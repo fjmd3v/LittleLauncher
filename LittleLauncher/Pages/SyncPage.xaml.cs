@@ -5,7 +5,7 @@ using LittleLauncher.Windows;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using System.IO;
-using System.Xml.Serialization;
+using System.Text.Json;
 using global::Windows.Storage.Pickers;
 using WinRT.Interop;
 
@@ -41,7 +41,7 @@ public partial class SyncPage : Page
     private async void ExportSshConfig_Click(object sender, RoutedEventArgs e)
     {
         var picker = new FileSavePicker();
-        picker.FileTypeChoices.Add("XML Files", new List<string> { ".xml" });
+        picker.FileTypeChoices.Add("JSON Files", new List<string> { ".json" });
         picker.SuggestedFileName = "ssh-connection";
         InitializePicker(picker);
         var file = await picker.PickSaveFileAsync();
@@ -50,9 +50,8 @@ public partial class SyncPage : Page
         try
         {
             var profile = SshConnectionProfile.FromCurrentSettings();
-            var serializer = new XmlSerializer(typeof(SshConnectionProfile));
-            using var writer = new StreamWriter(file.Path);
-            serializer.Serialize(writer, profile);
+            string json = JsonSerializer.Serialize(profile, new JsonSerializerOptions { WriteIndented = true });
+            await File.WriteAllTextAsync(file.Path, json);
             ShowStatus($"Connection profile exported to {Path.GetFileName(file.Path)}", InfoBarSeverity.Success);
         }
         catch (Exception ex)
@@ -65,6 +64,7 @@ public partial class SyncPage : Page
     private async void ImportSshConfig_Click(object sender, RoutedEventArgs e)
     {
         var picker = new FileOpenPicker();
+        picker.FileTypeFilter.Add(".json");
         picker.FileTypeFilter.Add(".xml");
         InitializePicker(picker);
         var file = await picker.PickSingleFileAsync();
@@ -72,9 +72,9 @@ public partial class SyncPage : Page
 
         try
         {
-            var serializer = new XmlSerializer(typeof(SshConnectionProfile));
-            using var reader = new StreamReader(file.Path);
-            if (serializer.Deserialize(reader) is SshConnectionProfile profile)
+            string content = await File.ReadAllTextAsync(file.Path);
+            var profile = JsonSerializer.Deserialize<SshConnectionProfile>(content);
+            if (profile != null)
             {
                 profile.ApplyToCurrentSettings();
                 SettingsManager.SaveSettings();
@@ -163,19 +163,22 @@ public partial class SyncPage : Page
 
     private async Task RunUploadAsync(string? password)
     {
-        ShowStatus("Uploading launcher items...", InfoBarSeverity.Informational);
-        var (success, message) = await SftpSyncService.UploadLauncherItemsAsync(password);
+        ShowStatus("Uploading launchers...", InfoBarSeverity.Informational);
+        var (success, message) = await SftpSyncService.UploadLaunchersAsync(password);
         ShowStatus(message, success ? InfoBarSeverity.Success : InfoBarSeverity.Error);
     }
 
     private async Task RunDownloadAsync(string? password)
     {
-        ShowStatus("Downloading launcher items...", InfoBarSeverity.Informational);
-        var (success, message) = await SftpSyncService.DownloadLauncherItemsAsync(password);
+        ShowStatus("Downloading launchers...", InfoBarSeverity.Informational);
+        var (success, message) = await SftpSyncService.DownloadLaunchersAsync(password);
         ShowStatus(message, success ? InfoBarSeverity.Success : InfoBarSeverity.Error);
 
         if (success)
+        {
             FlyoutWindow.InvalidateItems();
+            MainWindow.Current?.RefreshTrayIcons();
+        }
     }
 
     // -- Helpers --

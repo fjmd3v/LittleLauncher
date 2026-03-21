@@ -32,7 +32,8 @@ By default, launching the app opens the Settings window. Silent mode (tray icon 
 ## Settings persistence
 
 - `UserSettings` (the ViewModel) is an `ObservableObject` with `[ObservableProperty]` attributes.
-- `SettingsManager` (fully static) serialises it to XML at `%AppData%\LittleLauncher\settings.xml`.
+- `SettingsManager` (fully static) serialises it to JSON at `%AppData%\LittleLauncher\settings.json`.
+- On first load, migrates from legacy `settings.xml` (XmlSerializer) to `settings.json` (System.Text.Json), renaming the old file to `.bak`.
 - On startup, `RestoreSettings()` deserialises and calls `CompleteInitialization()` to enable change handlers.
 - `SaveSettings()` is called on settings window close and after SFTP download.
 
@@ -43,7 +44,7 @@ By default, launching the app opens the Settings window. Silent mode (tray icon 
 | Trigger | Caller |
 |---|---|
 | App startup (missing icons on disk) | `MainWindow.FetchMissingIconsOnStartupAsync()` |
-| SFTP sync download | `SftpSyncService.DownloadLauncherItemsAsync()` |
+| SFTP sync download | `SftpSyncService.DownloadLaunchersAsync()` |
 | File import (Launcher Items page) | `LauncherItemsPage.ImportItems_Click()` |
 | Manual add/edit | `DoFetch()` in add/edit dialog (calls `FaviconService` directly for the single item) |
 | PWA add | PWA combo selection handler (extracts shell icon via `FaviconService.GetPwaIconFromShell`, falls back to web favicon) |
@@ -53,39 +54,26 @@ After bulk icon changes, callers invoke `FlyoutWindow.InvalidateItems()` so the 
 ## SFTP sync
 
 `SftpSyncService` provides static async methods:
-- `UploadLauncherItemsAsync()` — serializes launcher items and uploads `launcher-items.xml` via SFTP.
-- `DownloadLauncherItemsAsync()` — downloads `launcher-items.xml`, deserializes, replaces the local launcher items collection, fetches missing icons via the unified pipeline, and saves.
+- `UploadLaunchersAsync()` — serializes all launchers to JSON and uploads `launchers.json` via SFTP.
+- `DownloadLaunchersAsync()` — downloads `launchers.json`, deserializes, replaces the local launchers collection, fetches missing icons via the unified pipeline, and saves. Falls back to legacy `launcher-items.xml` if `launchers.json` doesn't exist.
 - `TestConnectionAsync()` — verifies SSH connectivity and SFTP access.
 
+### Shared launcher sync
+
+Individual launchers can be shared via local/network files or per-launcher SFTP connections (separate from the global sync). `Launcher.SharedSyncMode` controls the transport: 0 = File (local or UNC path), 1 = SFTP.
+- **Owner** (`IsSharedOwner = true`): `ShareLauncherAsync()` pushes the launcher's items as `List<LauncherItem>` JSON.
+- **Subscriber** (`IsSharedOwner = false`): `SyncSharedLauncherAsync()` pulls items (read-only).
+- `VerifySharedLauncherAsync()` — validates the file/remote exists and is parseable (used before subscribing).
+- `SyncAllSharedLaunchersAsync()` — batch syncs all shared launchers (owners push, subscribers pull). File-mode always syncs; SFTP-mode skips launchers without an auto-detectable SSH key.
+
+The sharing UI lives in `LaunchersPage.xaml.cs`: "Share" button on unshared launcher cards, "Sync" and "Settings" buttons on shared cards, "Shared"/"Subscribed" badges, "Add Shared Launcher" subscribe dialog (with File/SFTP mode picker), and "Stop Sharing" via the share dialog's secondary button.
+
 `AutoSyncService` manages automatic sync triggers:
-- Downloads launcher items on startup.
+- Downloads launchers on startup, then syncs shared launchers.
 - Debounced upload (3 s) when items change.
-- Periodic download on a configurable interval.
-- Also syncs all shared groups on startup and periodically (via `SharedGroupSyncService`).
+- Periodic download on a configurable interval, followed by shared launcher sync.
 
 Supports both private-key (`PrivateKeyFile`) and password-based authentication.
-
-## Shared group sync
-
-`SharedGroupSyncService` provides 1-way sync for individual launcher item **groups** that are shared between users.
-
-- **Owner** (publisher): serializes the group's `Children` to a `List<LauncherItem>` XML and writes it to a local file or SFTP path. The group name is **not** included in the file — each subscriber chooses their own name.
-- **Subscriber** (consumer): reads the XML from the same location and replaces their local group's `Children`. The group is read-only in the UI.
-
-Configuration per shared group is stored in `UserSettings.SharedGroupSources` as `SharedGroupSource` objects. Each source references its linked `LauncherItem` group via a matching `SharedGroupId` GUID.
-
-**Setup flow (owner):** Click the share icon on a normal group → `ShowShareGroupDialog` → pick local path or SFTP connection → initial outgoing sync.
-
-**Setup flow (subscriber):** Click "Add Shared Group" → `ShowAddSharedGroupDialog` → enter group name + location → file is verified, then a new read-only group is added.
-
-**Removing sharing:**
-- Owner: Edit dialog → "Stop Sharing" button → clears `SharedGroupId`, removes `SharedGroupSource`.
-- Subscriber: Remove button → removes the group item and its `SharedGroupSource`.
-
-**Sync triggers:**
-- Startup: `AutoSyncService.SyncOnStartupAsync()` calls `SyncAllIncomingAsync` + `SyncAllOutgoingAsync`.
-- Periodic: periodic download also calls `SyncAllIncomingAsync`.
-- Manual: "Sync Now" button in the settings page (owner = outgoing, subscriber = incoming).
 
 ## Theme system
 

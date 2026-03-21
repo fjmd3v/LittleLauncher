@@ -1,0 +1,29 @@
+<Page x:Class="LittleLauncher.Pages.LaunchersPage"
+      xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+      xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <Grid>
+            <StackPanel x:Name="LaunchersPanel" MaxWidth="1000" Margin="16">
+
+                <TextBlock Text="Launchers" FontSize="24" FontWeight="SemiBold" Margin="0,0,0,8"/>
+                <TextBlock Text="Each launcher has its own set of launcher items and its own tray icon."
+                           FontSize="13" Opacity="0.6" Margin="0,0,0,20"/>
+
+                <!-- Launcher cards are added here in code-behind -->
+
+                <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,8,0,60">
+                    <Button x:Name="AddLauncherButton" Content="+ Add Launcher"
+                            Click="AddLauncherButton_Click" HorizontalAlignment="Left"/>
+                    <Button x:Name="AddSharedLauncherButton" Click="AddSharedLauncherButton_Click"
+                            HorizontalAlignment="Left">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <FontIcon Glyph="&#xE753;" FontSize="14"/>
+                            <TextBlock Text="Add Shared Launcher"/>
+                        </StackPanel>
+                    </Button>
+                </StackPanel>
+            </StackPanel>
+        </Grid>
+    </ScrollViewer>
+</Page>

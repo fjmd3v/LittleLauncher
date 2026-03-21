@@ -1,9 +1,10 @@
 using CommunityToolkit.Mvvm.ComponentModel;
 using LittleLauncher.Classes.Settings;
 using LittleLauncher.Models;
+using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
-using System.Xml.Serialization;
+using System.Text.Json.Serialization;
 
 namespace LittleLauncher.ViewModels;
 
@@ -24,17 +25,18 @@ public partial class UserSettings : ObservableObject
     [ObservableProperty]
     public partial bool Startup { get; set; }
 
-    /// <summary>Hide the tray icon completely.</summary>
-    [ObservableProperty]
-    public partial bool NIconHide { get; set; }
+    // NIconHide, TrayIconMode, CustomTrayIconPath are kept here as legacy XML migration fields only.
+    // They are copied into the first Launcher during CompleteInitialization() and then cleared.
+    // Per-launcher icon settings now live on each Launcher object in the Launchers collection.
 
-    /// <summary>Tray icon style. 0-5 = Color rockets (Blue/Green/Teal/Red/Orange/Purple), 6-11 = Glyphs (Pin/Star/Heart/Lightning/Search/Globe), 12 = Custom.</summary>
-    [ObservableProperty]
-    public partial int TrayIconMode { get; set; }
+    /// <summary>[Migration] Legacy hide-tray-icon flag. Migrated to first Launcher.NIconHide on load.</summary>
+    public bool NIconHide { get; set; }
 
-    /// <summary>Path to a custom tray icon file (.ico or .png) when TrayIconMode is Custom.</summary>
-    [ObservableProperty]
-    public partial string CustomTrayIconPath { get; set; }
+    /// <summary>[Migration] Legacy tray icon style. Migrated to first Launcher.TrayIconMode on load.</summary>
+    public int TrayIconMode { get; set; }
+
+    /// <summary>[Migration] Legacy custom icon path. Migrated to first Launcher.CustomTrayIconPath on load.</summary>
+    public string CustomTrayIconPath { get; set; } = "";
 
     /// <summary>Last known app version string.</summary>
     [ObservableProperty]
@@ -63,7 +65,7 @@ public partial class UserSettings : ObservableObject
     [NotifyPropertyChangedFor(nameof(TaskbarWidgetManualPaddingText))]
     public partial int TaskbarWidgetManualPadding { get; set; }
 
-    [XmlIgnore]
+    [JsonIgnore]
     public string TaskbarWidgetManualPaddingText
     {
         get => TaskbarWidgetManualPadding.ToString();
@@ -86,16 +88,20 @@ public partial class UserSettings : ObservableObject
         }
     }
 
-    // ── Launcher Items ──────────────────────────────────────────────
-
-    /// <summary>Application / website shortcuts shown in the taskbar widget.</summary>
-    public ObservableCollection<LauncherItem> LauncherItems { get; set; }
+    // ── Launchers ─────────────────────────────────────────────────────
 
     /// <summary>
-    /// Shared group sources — both groups this user publishes (IsOwner = true)
-    /// and groups subscribed from others (IsOwner = false).
+    /// The named launchers. Each launcher has its own items, tray icon, and identity.
+    /// Replaces the legacy flat LauncherItems collection.
     /// </summary>
-    public List<SharedGroupSource> SharedGroupSources { get; set; }
+    public ObservableCollection<Launcher> Launchers { get; set; } = [];
+
+    /// <summary>
+    /// [Migration] Legacy flat launcher items list. Present in old settings files.
+    /// On load, migrated into the first Launcher's Items and cleared. Not used in new code.
+    /// </summary>
+    [JsonIgnore]
+    public ObservableCollection<LauncherItem> LauncherItems { get; set; } = [];
 
     // ── SFTP Sync ───────────────────────────────────────────────────
 
@@ -129,7 +135,7 @@ public partial class UserSettings : ObservableObject
 
     // ── Initialisation flag ─────────────────────────────────────────
 
-    [XmlIgnore]
+    [JsonIgnore]
     private bool _initializing = true;
 
     // ── Constructor (defaults) ──────────────────────────────────────
@@ -143,10 +149,9 @@ public partial class UserSettings : ObservableObject
         CustomTrayIconPath = "";
         LastKnownVersion = "";
 
-        // Do NOT populate defaults here — XmlSerializer calls this constructor
-        // then appends deserialized items, which would double the list.
-        LauncherItems = [];
-        SharedGroupSources = [];
+        // Do NOT populate defaults here — the JSON deserializer calls this constructor
+        // then overwrites with deserialized values.
+        Launchers = [];
 
         SftpHost = "";
         SftpPort = 22;
@@ -160,12 +165,38 @@ public partial class UserSettings : ObservableObject
     /// <summary>Called after XML deserialization to finalize initialization.</summary>
     internal void CompleteInitialization()
     {
-        // Populate default launcher items only if none were deserialized
-        if (LauncherItems.Count == 0)
+        // ── Launcher migration ───────────────────────────────────────
+        // Migrate from the old flat LauncherItems / global icon settings to a Launcher-based model.
+        if (Launchers.Count == 0)
         {
-            LauncherItems.Add(new LauncherItem("Google", "https://www.google.com", "\uE774", isWebsite: true));
-            LauncherItems.Add(new LauncherItem("Explorer", "explorer.exe", "Folder24"));
-            LauncherItems.Add(new LauncherItem("Notepad", "notepad.exe", "Notepad24"));
+            var defaultLauncher = new Launcher
+            {
+                Id = Guid.NewGuid().ToString(),
+                Name = "Default",
+                // Carry over global icon settings from the legacy fields
+                TrayIconMode = TrayIconMode,
+                CustomTrayIconPath = CustomTrayIconPath,
+                NIconHide = NIconHide,
+            };
+
+            if (LauncherItems.Count > 0)
+            {
+                // Migrate existing items into the default launcher
+                foreach (var item in LauncherItems)
+                    defaultLauncher.Items.Add(item);
+            }
+            else
+            {
+                // No legacy items — seed with sample shortcuts
+                defaultLauncher.Items.Add(new LauncherItem("Google", "https://www.google.com", "\uE774", isWebsite: true));
+                defaultLauncher.Items.Add(new LauncherItem("Explorer", "explorer.exe", "Folder24"));
+                defaultLauncher.Items.Add(new LauncherItem("Notepad", "notepad.exe", "Notepad24"));
+            }
+
+            Launchers.Add(defaultLauncher);
+
+            // Clear legacy fields — they are now represented inside the launcher
+            LauncherItems.Clear();
         }
 
         _initializing = false;
@@ -177,25 +208,5 @@ public partial class UserSettings : ObservableObject
     {
         if (oldValue == newValue || _initializing) return;
         LittleLauncher.Classes.ThemeManager.ApplyAndSaveTheme(newValue);
-    }
-
-    partial void OnTrayIconModeChanged(int oldValue, int newValue)
-    {
-        if (oldValue == newValue || _initializing) return;
-        ApplyTrayIconChange();
-    }
-
-    partial void OnCustomTrayIconPathChanged(string oldValue, string newValue)
-    {
-        if (oldValue == newValue || _initializing) return;
-        if (TrayIconMode == 12) // Custom
-            ApplyTrayIconChange();
-    }
-
-    private void ApplyTrayIconChange()
-    {
-        if ((Microsoft.UI.Xaml.Application.Current as App)?.m_window is MainWindow mw)
-            mw.UpdateTrayIcon();
-        LittleLauncher.Classes.Settings.SettingsManager.SaveSettings();
     }
 }

@@ -6,13 +6,14 @@ Little Launcher is a .NET 10 WinUI 3 desktop application (unpackaged) that provi
 
 ## Architecture
 
-- **Single-instance app** enforced via a named `Mutex` ("LittleLauncher"). A second launch signals the first instance via `PostMessage` with registered window messages (`LittleLauncher_ShowFlyout`, `LittleLauncher_ShowSettings`).
-- **MainWindow** is invisible (moved off-screen, 1×1). It owns the system-tray icon (`H.NotifyIcon.TaskbarIcon`). Uses `WS_EX_TOOLWINDOW` to hide from Alt-Tab.
-- **FlyoutWindow** is a popup that displays launcher items with icons. Shown from tray icon click, positioned above the taskbar, dismissed on focus loss or Escape.
-- **SettingsWindow** is a WinUI 3 window with `MicaBackdrop`. It uses `NavigationView` with page-based navigation (Home, Launcher Items, Cloud Sync, Settings, About).
-- **Settings** are serialised to `%AppData%\LittleLauncher\settings.xml` via `XmlSerializer`, managed by the fully static `SettingsManager`.
-- **SftpSyncService** uses SSH.NET for async upload/download of the settings file to a configurable remote server.
-- **LauncherShortcut** (`LittleLauncherFlyout.exe`) is a companion exe pinned to the taskbar. It signals the main app via `PostMessage` then exits. Release builds are Native AOT for instant startup — see the performance warning in `ARCHITECTURE.md`.
+- **Single-instance app** enforced via a named `Mutex` ("LittleLauncher"). A second launch signals the first instance via `PostMessage` with registered window messages (`LittleLauncher_ShowFlyout_{launcherId}`, `LittleLauncher_ShowSettings`).
+- **Launchers** — users define one or more named `Launcher` objects (model: `LittleLauncher.Models.Launcher`). Each launcher has its own `Items` collection, tray icon (mode + optional custom path), and `NIconHide` visibility flag. Settings include a `Launchers: ObservableCollection<Launcher>`. On first run with old settings, the legacy `LauncherItems` list is migrated into a "Default" launcher.
+- **MainWindow** is invisible (moved off-screen, 1×1). It owns one native tray icon per launcher via `Shell_NotifyIcon` (stored in `_trayIcons: Dictionary<string, TrayIconEntry>`). Uses `WS_EX_TOOLWINDOW` to hide from Alt-Tab.
+- **FlyoutWindow** is a popup that displays launcher items with icons. One instance is maintained per launcher (`_instances: Dictionary<string, FlyoutWindow>`). Shown from a launcher's tray icon click, positioned above the taskbar, dismissed on focus loss or Escape.
+- **SettingsWindow** is a WinUI 3 window with `MicaBackdrop`. It uses `NavigationView` with page-based navigation (Home, Launchers, Cloud Sync, Settings, About). The Launchers page has a drill-in to LauncherItemsPage via `SettingsWindow.NavigateToLauncherItems(Launcher)`.
+- **Settings** are serialised to `%AppData%\LittleLauncher\settings.json` via `System.Text.Json`, managed by the fully static `SettingsManager`. On first load, migrates from legacy `settings.xml` (XmlSerializer) to JSON.
+- **SftpSyncService** uses SSH.NET for async upload/download of all launchers (as `launchers.json`) to a configurable remote server. Also handles per-launcher shared sync (owner pushes, subscriber pulls via separate SFTP connections).
+- **LauncherShortcut** (`LittleLauncherFlyout.exe`) is a companion exe pinned to the taskbar. It signals the main app via `PostMessage` with a launcher-specific message (`LittleLauncher_ShowFlyout_{launcherId}`) then exits. Accepts `--launcher {guid}` argument (also supports legacy `--layout` for backward compat). Release builds are Native AOT for instant startup — see the performance warning in `ARCHITECTURE.md`.
 
 ## Key namespaces
 
@@ -21,19 +22,21 @@ Little Launcher is a .NET 10 WinUI 3 desktop application (unpackaged) that provi
 | `LittleLauncher` | App, MainWindow, SettingsWindow |
 | `LittleLauncher.Classes` | NativeMethods, ThemeManager |
 | `LittleLauncher.Classes.Settings` | SettingsManager |
-| `LittleLauncher.Models` | LauncherItem, SshConnectionProfile, SharedGroupSource |
+| `LittleLauncher.Models` | LauncherItem, Launcher, SshConnectionProfile |
 | `LittleLauncher.Pages` | All settings pages |
-| `LittleLauncher.Services` | SftpSyncService, SharedGroupSyncService, FaviconService, UpdateService |
+| `LittleLauncher.Services` | SftpSyncService, AutoSyncService, FaviconService, UpdateService |
 | `LittleLauncher.ViewModels` | UserSettings |
 | `LittleLauncher.Windows` | FlyoutWindow |
 
 **Note:** The `LittleLauncher.Windows` namespace shadows the WinRT `Windows.*` namespace. Use `global::Windows.` prefix when accessing WinRT types (e.g. `global::Windows.Graphics.PointInt32`).
 
+**Note:** `LittleLauncher.Models.Launcher` conflicts with other framework types. Use `using Launcher = LittleLauncher.Models.Launcher;` at the top of any file where disambiguation is needed.
+
 ## Conventions
 
 - Use `[ObservableProperty]` from CommunityToolkit.Mvvm for all bindable settings properties.
 - Partial `On<Property>Changed` methods in `UserSettings` handle side-effects (theme changes, taskbar updates).
-- An `_initializing` flag in `UserSettings` suppresses change handlers during XML deserialization.
+- An `_initializing` flag in `UserSettings` suppresses change handlers during deserialization.
 - P/Invoke declarations live in `NativeMethods.cs`. Always use `using static LittleLauncher.Classes.NativeMethods;` imports.
 - Use `[LibraryImport]` for new P/Invoke declarations; existing ones use `[DllImport]`.
 - Pages are WinUI 3 `Page` objects navigated via `NavigationView`. No MVVM framework routing — just `TargetPageType` in XAML.
@@ -65,7 +68,7 @@ Release builds AOT-publish the companion exe (`LauncherShortcut`) automatically.
 
 - **Add a new settings page:** Create `Pages/FooPage.xaml` + `.cs`, add a `NavigationViewItem` in `SettingsWindow.xaml`, add any new string keys to `Dictionary-en-US.xaml`.
 - **Add a new launcher feature:** Extend `LauncherItem` model, update `FlyoutWindow` to render it, update `LauncherItemsPage` for editing.
-- **Add a new setting:** Add an `[ObservableProperty]` to `UserSettings.cs`. It will auto-serialize to XML.
+- **Add a new setting:** Add an `[ObservableProperty]` to `UserSettings.cs`. It will auto-serialize to JSON.
 
 ## Launcher item types
 
@@ -78,15 +81,9 @@ Release builds AOT-publish the companion exe (`LauncherShortcut`) automatically.
 | Group | — | — | — | — | Not launchable (collapsible parent containing child items/headings via `Children` collection) |
 | Column Break | — | — | — | — | Not launchable (splits the flyout into a new side-by-side column; `IsColumnBreak = true`) |
 
-Groups have a `Children` (`ObservableCollection<LauncherItem>`) that holds nested items and headings. In the settings page, groups render as custom expand/collapse cards (StackPanel with `Tag="GroupRoot"` / `Tag="GroupChildren"`), not WinUI Expanders — this allows the entire group card to be a drag-and-drop source. `LauncherItem.IsExpanded` (`[XmlIgnore]`, defaults `true`) tracks the collapse state so it survives `RefreshList()` re-renders. In the flyout, the hierarchy is flattened for display. `IsHeading` is serialized as `<IsCategory>` in XML for backward compatibility.
+Groups have a `Children` (`ObservableCollection<LauncherItem>`) that holds nested items and headings. In the settings page, groups render as custom expand/collapse cards (StackPanel with `Tag="GroupRoot"` / `Tag="GroupChildren"`), not WinUI Expanders — this allows the entire group card to be a drag-and-drop source. `LauncherItem.IsExpanded` (`[JsonIgnore]`, defaults `true`) tracks the collapse state so it survives `RefreshList()` re-renders. In the flyout, the hierarchy is flattened for display.
 
-A group becomes a **shared group** when `LauncherItem.SharedGroupId` is set to a non-empty GUID matching a `SharedGroupSource` in `UserSettings.SharedGroupSources`. Shared groups have two roles:
-- **Owner** (`SharedGroupSource.IsOwner = true`): the group is editable; children are serialized to an XML file (local or SFTP) whenever synced. Displayed with an accent-border and "Shared" badge in the settings UI.
-- **Subscriber** (`SharedGroupSource.IsOwner = false`): the group's children are replaced when synced from the shared file. Children are read-only — no drag, no edit/move/remove. Displayed with a "Subscribed" badge.
-
-Removing a shared group also removes its `SharedGroupSource` from settings. Stopping sharing (owner) via the Edit dialog clears `SharedGroupId` and removes the `SharedGroupSource` but leaves the group intact.
-
-Column breaks (`IsColumnBreak = true`) are structural dividers that cause the flyout to render a new side-by-side column. They are not displayed or launchable — they only affect flyout layout. Created via `LauncherItem.CreateColumnBreak()`.
+Column breaks (`IsColumnBreak = true`) are structural dividers that cause the flyout to render a new side-by-side column. They are not displayed or launchable — they only affect flyout column layout. Created via `LauncherItem.CreateColumnBreak()`.
 
 PWAs are auto-detected by enumerating `shell:AppsFolder` for Chromium-registered app entries (AUMIDs matching `{domain}-{HEX}_{hash}!App`). Icons are fetched from the PWA domain via `FaviconService.FetchAndCacheAsync()`.
 - **Release a new version:** Edit `<Version>` in `Directory.Build.props`, update fallback version in `Package.wxs`, commit, tag `vX.Y.Z`, push. The MSIX manifest version is auto-stamped by `LittleLauncherMSIX/build-msix.ps1`. See `versioning.instructions.md` for the full checklist.

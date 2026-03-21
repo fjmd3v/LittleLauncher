@@ -54,6 +54,10 @@ static class Program
     [DllImport("user32.dll")]
     private static extern int GetSystemMetrics(int nIndex);
 
+    // Shell import for per-launcher AUMID
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
+    private static extern int SetCurrentProcessExplicitAppUserModelID(string AppID);
+
     private static readonly nint DpiAwarenessContextPerMonitorAwareV2 = new(-4);
 
     [StructLayout(LayoutKind.Sequential)]
@@ -68,28 +72,37 @@ static class Program
 
     private static nint CbtCallback(int code, nint wParam, nint lParam)
     {
-        const int HCBT_CREATEWND = 3;
-        const int HCBT_ACTIVATE = 5;
-        if (code == HCBT_CREATEWND || code == HCBT_ACTIVATE)
+        try
         {
-            // wParam is the HWND — set our icon immediately.
-            // HCBT_CREATEWND fires before the window is visible, so the shell
-            // picks up our icon for the taskbar without flashing the embedded one.
-            // HCBT_ACTIVATE is a backup to re-set the icon once fully initialized.
-            if (_hIconBig != 0)
-                SendMessage(wParam, 0x0080 /* WM_SETICON */, 1 /* ICON_BIG */, _hIconBig);
-            if (_hIconSmall != 0)
-                SendMessage(wParam, 0x0080 /* WM_SETICON */, 0 /* ICON_SMALL */, _hIconSmall);
-            // Unhook on activate — the dialog is fully initialized at this point
-            if (code == HCBT_ACTIVATE && _cbtHook != 0)
+            const int HCBT_CREATEWND = 3;
+            const int HCBT_ACTIVATE = 5;
+            if (code == HCBT_CREATEWND || code == HCBT_ACTIVATE)
             {
-                UnhookWindowsHookEx(_cbtHook);
-                _cbtHook = 0;
+                // wParam is the HWND — set our icon immediately.
+                // HCBT_CREATEWND fires before the window is visible, so the shell
+                // picks up our icon for the taskbar without flashing the embedded one.
+                // HCBT_ACTIVATE is a backup to re-set the icon once fully initialized.
+                if (_hIconBig != 0)
+                    SendMessage(wParam, 0x0080 /* WM_SETICON */, 1 /* ICON_BIG */, _hIconBig);
+                if (_hIconSmall != 0)
+                    SendMessage(wParam, 0x0080 /* WM_SETICON */, 0 /* ICON_SMALL */, _hIconSmall);
+                // Unhook on activate — the dialog is fully initialized at this point
+                if (code == HCBT_ACTIVATE && _cbtHook != 0)
+                {
+                    UnhookWindowsHookEx(_cbtHook);
+                    _cbtHook = 0;
+                }
             }
+        }
+        catch
+        {
+            // Swallow: an unhandled managed exception here causes
+            // STATUS_FATAL_USER_CALLBACK_EXCEPTION and kills the process.
         }
         return CallNextHookEx(0, code, wParam, lParam);
     }
 
+    [STAThread]
     static void Main(string[] args)
     {
         // Ensure cursor coordinates are reported in physical pixels.
@@ -97,13 +110,33 @@ static class Program
         // causing the flyout anchor to be offset on scaled displays.
         _ = SetProcessDpiAwarenessContext(DpiAwarenessContextPerMonitorAwareV2);
 
+        // Parse --launcher {guid} argument (may be in any position)
+        string? launcherId = null;
+        for (int i = 0; i < args.Length - 1; i++)
+        {
+            if (args[i] == "--launcher" || args[i] == "--layout")
+            {
+                launcherId = args[i + 1];
+                break;
+            }
+        }
+
         if (args.Length > 0 && args[0] == "--pin")
         {
-            // Load the custom icon at proper sizes so the taskbar shows it
-            // immediately when the pin dialog appears (via CBT hook below).
-            // Use AppContext.BaseDirectory — in MSIX, the companion exe lives
-            // in the physical VFS redirect folder, so the icon is right next to it.
+            // Load the per-launcher icon if available, falling back to the canonical app icon.
             string iconPath = Path.Combine(AppContext.BaseDirectory, "app-icon.ico");
+            if (!string.IsNullOrEmpty(launcherId))
+            {
+                string perLauncherIcon = Path.Combine(AppContext.BaseDirectory, $"app-icon-{launcherId}.ico");
+                if (File.Exists(perLauncherIcon))
+                    iconPath = perLauncherIcon;
+
+                // Give each launcher a distinct App User Model ID so the shell
+                // matches the running window to the per-launcher Start Menu shortcut
+                // created by the main app.  Pinning then inherits the shortcut's
+                // target, arguments, and icon.
+                SetCurrentProcessExplicitAppUserModelID($"LittleLauncher.Flyout.{launcherId}");
+            }
 
             if (File.Exists(iconPath))
             {
@@ -129,7 +162,7 @@ static class Program
                 "Right-click the taskbar icon for this app and choose \"Pin to taskbar\".\n\n" +
                 "Click OK to close this window once you're done.",
                 "Pin to Taskbar",
-                0x00000040 /* MB_ICONINFORMATION */);
+                0x00010040 /* MB_ICONINFORMATION | MB_SETFOREGROUND */);
 
             // Clean up in case the hook wasn't triggered
             if (_cbtHook != 0)
@@ -188,7 +221,12 @@ static class Program
 
         // App is running — signal it to show the flyout.
         GetCursorPos(out var pt);
-        var msg = (int)RegisterWindowMessage("LittleLauncher_ShowFlyout");
+        // Use a per-launcher message name if a launcher ID was specified,
+        // otherwise use the legacy message for backward compat.
+        string msgName = string.IsNullOrEmpty(launcherId)
+            ? "LittleLauncher_ShowFlyout"
+            : $"LittleLauncher_ShowFlyout_{launcherId}";
+        var msg = (int)RegisterWindowMessage(msgName);
         PostMessage(target, msg, pt.X, pt.Y);
     }
 }
