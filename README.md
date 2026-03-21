@@ -33,6 +33,8 @@ Little Launcher lives in the Windows system tray. Clicking the tray icon opens a
 - **Taskbar pinning** — a companion helper exe (`LauncherShortcut`) can be pinned to the taskbar so one click opens the flyout without needing to find the tray icon.
 - **Theme support** — follows the Windows system theme or can be set to Light/Dark explicitly.
 - **Export & import** — back up and restore items locally via JSON.
+- **Bookmark import** — import bookmarks directly from Chrome, Edge, Firefox, or any browser's exported HTML bookmarks file into a launcher.
+- **Hover-reveal controls** — item action buttons fade in on hover to keep the list clean and uncluttered.
 
 ## Architecture
 
