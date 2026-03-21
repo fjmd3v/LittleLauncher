@@ -136,8 +136,8 @@
         <TextBlock Text="Actions" FontSize="14" FontWeight="SemiBold" Margin="0,16,0,6"/>
         <StackPanel Orientation="Horizontal" Margin="0,0,0,8" Spacing="8">
             <Button Content="Test Connection" Click="TestConnection_Click"/>
-            <Button Content="Upload Launcher Items" Click="Upload_Click"/>
-            <Button Content="Download Launcher Items" Click="Download_Click"/>
+            <Button Content="Upload Launchers" Click="Upload_Click"/>
+            <Button Content="Download Launchers" Click="Download_Click"/>
         </StackPanel>
 
         <!-- Status display -->

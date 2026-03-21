@@ -265,7 +265,6 @@ public partial class LauncherItemsPage : Page
 
     private void ItemCard_Loaded(object sender, RoutedEventArgs e)
     {
-        if (!_isReadOnly) return;
         if (sender is not Border border || border.Child is not Panel panel) return;
 
         // For regular items and column breaks, child is a Grid.
@@ -277,30 +276,78 @@ public partial class LauncherItemsPage : Page
         {
             if (child is not FrameworkElement fe) continue;
 
-            // Hide drag grip (Column 0 FontIcon)
-            if (Grid.GetColumn(fe) == 0 && fe is FontIcon)
+            // Hide drag grip in readonly mode (Column 0 FontIcon)
+            if (_isReadOnly && Grid.GetColumn(fe) == 0 && fe is FontIcon)
                 fe.Visibility = Visibility.Collapsed;
 
-            // Hide action buttons (Column 3 StackPanel)
-            if (Grid.GetColumn(fe) == 3 && fe is StackPanel)
-                fe.Visibility = Visibility.Collapsed;
+            // Hide action buttons on load; use Opacity so layout height is preserved (no jank on hover)
+            if (Grid.GetColumn(fe) == 3 && fe is StackPanel sp3)
+            {
+                if (_isReadOnly)
+                    sp3.Visibility = Visibility.Collapsed;
+                else
+                {
+                    sp3.Opacity = 0;
+                    sp3.IsHitTestVisible = false;
+                }
+            }
         }
     }
 
     private void ItemCard_PointerEntered(object sender, Microsoft.UI.Xaml.Input.PointerRoutedEventArgs e)
     {
         if (_isReadOnly) return;
-        if (sender is Border border && FindGripIcon(border) is FontIcon grip)
-            grip.Opacity = 0.8;
+        if (sender is Border border)
+        {
+            if (FindGripIcon(border) is FontIcon grip)
+                grip.Opacity = 0.8;
+            // Group buttons are shown/hidden by GroupHeader_PointerEntered/Exited instead
+            if (!IsGroupCard(border) && FindButtonsPanel(border) is StackPanel buttons)
+            {
+                buttons.Opacity = 1;
+                buttons.IsHitTestVisible = true;
+            }
+        }
         this.ProtectedCursor = _sizeAllCursor;
     }
 
     private void ItemCard_PointerExited(object sender, Microsoft.UI.Xaml.Input.PointerRoutedEventArgs e)
     {
         if (_isReadOnly) return;
-        if (sender is Border border && FindGripIcon(border) is FontIcon grip)
-            grip.Opacity = 0.3;
+        if (sender is Border border)
+        {
+            if (FindGripIcon(border) is FontIcon grip)
+                grip.Opacity = 0.3;
+            // Group buttons are shown/hidden by GroupHeader_PointerEntered/Exited instead
+            if (!IsGroupCard(border) && FindButtonsPanel(border) is StackPanel buttons)
+            {
+                buttons.Opacity = 0;
+                buttons.IsHitTestVisible = false;
+            }
+        }
         this.ProtectedCursor = _arrowCursor;
+    }
+
+    private void GroupHeader_PointerEntered(object sender, Microsoft.UI.Xaml.Input.PointerRoutedEventArgs e)
+    {
+        if (_isReadOnly) return;
+        var border = FindParentBorder(sender as DependencyObject);
+        if (border != null && FindButtonsPanel(border) is StackPanel buttons)
+        {
+            buttons.Opacity = 1;
+            buttons.IsHitTestVisible = true;
+        }
+    }
+
+    private void GroupHeader_PointerExited(object sender, Microsoft.UI.Xaml.Input.PointerRoutedEventArgs e)
+    {
+        if (_isReadOnly) return;
+        var border = FindParentBorder(sender as DependencyObject);
+        if (border != null && FindButtonsPanel(border) is StackPanel buttons)
+        {
+            buttons.Opacity = 0;
+            buttons.IsHitTestVisible = false;
+        }
     }
 
     private void ItemButtons_PointerEntered(object sender, Microsoft.UI.Xaml.Input.PointerRoutedEventArgs e)
@@ -315,6 +362,20 @@ public partial class LauncherItemsPage : Page
         e.Handled = true;
     }
 
+    private static bool IsGroupCard(Border border) =>
+        border.Child is StackPanel sp && sp.Tag as string == "GroupRoot";
+
+    private static Border? FindParentBorder(DependencyObject? element)
+    {
+        var current = element as FrameworkElement;
+        while (current != null)
+        {
+            if (current is Border border) return border;
+            current = current.Parent as FrameworkElement;
+        }
+        return null;
+    }
+
     private static FontIcon? FindGripIcon(Border border)
     {
         // The grip icon is the first FontIcon child of the first Grid/StackPanel inside the Border
@@ -325,6 +386,18 @@ public partial class LauncherItemsPage : Page
             if (grid?.Children.FirstOrDefault() is FontIcon icon)
                 return icon;
         }
+        return null;
+    }
+
+    private static StackPanel? FindButtonsPanel(Border border)
+    {
+        // The buttons panel is the Column 3 StackPanel in the header Grid
+        if (border.Child is not Panel panel) return null;
+        var grid = panel as Grid ?? (panel as StackPanel)?.Children.FirstOrDefault() as Grid;
+        if (grid == null) return null;
+        foreach (var child in grid.Children)
+            if (child is StackPanel sp && Grid.GetColumn(sp) == 3)
+                return sp;
         return null;
     }
 
@@ -2112,5 +2185,494 @@ public partial class LauncherItemsPage : Page
 
         // Invalidate the flyout so it picks up new items + icons
         FlyoutWindow.InvalidateItems();
+    }
+
+    // -- Bookmark import --
+
+    /// <summary>Represents a node in a browser bookmark tree — either a folder or a URL bookmark.</summary>
+    private sealed class BookmarkNode
+    {
+        public string Name { get; init; } = "";
+        public string? Url { get; init; }   // null for folders
+        public List<BookmarkNode> Children { get; } = [];
+        public bool IsFolder => Url == null;
+
+        public int CountLeaves()
+        {
+            if (!IsFolder) return 1;
+            return Children.Sum(c => c.CountLeaves());
+        }
+    }
+
+    /// <summary>Reads bookmarks from a Chromium profile directory, returning a root folder tree.</summary>
+    private static List<BookmarkNode> ReadChromiumBookmarks(string profileDir)
+    {
+        var result = new List<BookmarkNode>();
+        string path = Path.Combine(profileDir, "Bookmarks");
+        if (!File.Exists(path)) return result;
+
+        try
+        {
+            using var doc = JsonDocument.Parse(File.ReadAllText(path));
+            if (!doc.RootElement.TryGetProperty("roots", out var roots)) return result;
+
+            static BookmarkNode? ParseNode(JsonElement el)
+            {
+                if (!el.TryGetProperty("type", out var tp)) return null;
+                string type = tp.GetString() ?? "";
+                string name = el.TryGetProperty("name", out var n) ? n.GetString() ?? "" : "";
+
+                if (type == "url")
+                {
+                    string url = el.TryGetProperty("url", out var u) ? u.GetString() ?? "" : "";
+                    if (string.IsNullOrEmpty(url) ||
+                        url.StartsWith("chrome://", StringComparison.OrdinalIgnoreCase) ||
+                        url.StartsWith("edge://", StringComparison.OrdinalIgnoreCase) ||
+                        url.StartsWith("about:", StringComparison.OrdinalIgnoreCase))
+                        return null;
+                    return new BookmarkNode { Name = string.IsNullOrEmpty(name) ? url : name, Url = url };
+                }
+                if (type == "folder")
+                {
+                    var folder = new BookmarkNode { Name = name };
+                    if (el.TryGetProperty("children", out var children))
+                        foreach (var child in children.EnumerateArray())
+                        {
+                            var parsed = ParseNode(child);
+                            if (parsed != null) folder.Children.Add(parsed);
+                        }
+                    return folder;
+                }
+                return null;
+            }
+
+            var rootSections = new[] {
+                ("bookmark_bar", "Bookmarks Bar"),
+                ("other",        "Other Bookmarks"),
+                ("synced",       "Synced Bookmarks"),
+            };
+            foreach (var (key, displayName) in rootSections)
+            {
+                if (!roots.TryGetProperty(key, out var rootEl)) continue;
+                var parsed = ParseNode(rootEl);
+                if (parsed == null || parsed.CountLeaves() == 0) continue;
+                // Wrap using a friendly top-level name instead of the browser's internal label
+                var container = new BookmarkNode { Name = displayName };
+                foreach (var child in parsed.Children) container.Children.Add(child);
+                result.Add(container);
+            }
+        }
+        catch { }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Reads bookmarks from a Firefox/Gecko profile directory using the most recent
+    /// auto-generated jsonlz4 backup (no SQLite dependency required).
+    /// </summary>
+    private static List<BookmarkNode> ReadGeckoBookmarks(string profileDir)
+    {
+        var result = new List<BookmarkNode>();
+        string backupDir = Path.Combine(profileDir, "bookmarkbackups");
+        if (!Directory.Exists(backupDir)) return result;
+
+        string? latestFile = Directory.GetFiles(backupDir, "*.jsonlz4")
+            .OrderByDescending(File.GetLastWriteTimeUtc)
+            .FirstOrDefault();
+        if (latestFile == null) return result;
+
+        try
+        {
+            byte[] raw = File.ReadAllBytes(latestFile);
+            // mozLz40\0 magic (8 bytes) + original size little-endian int32 (4 bytes) + LZ4 block data
+            if (raw.Length < 12 ||
+                raw[0] != 'm' || raw[1] != 'o' || raw[2] != 'z' || raw[3] != 'L' ||
+                raw[4] != 'z' || raw[5] != '4' || raw[6] != '0' || raw[7] != 0)
+                return result;
+
+            int origSize = BitConverter.ToInt32(raw, 8);
+            if (origSize <= 0 || origSize > 64 * 1024 * 1024) return result;
+
+            byte[] json = DecompressLz4Block(raw.AsSpan(12), origSize);
+            using var doc = JsonDocument.Parse(json);
+
+            static BookmarkNode? ParseGeckoNode(JsonElement el)
+            {
+                if (!el.TryGetProperty("type", out var tp)) return null;
+                string type = tp.GetString() ?? "";
+                string name = el.TryGetProperty("title", out var n) ? n.GetString() ?? "" : "";
+
+                if (type == "text/x-moz-place")
+                {
+                    string uri = el.TryGetProperty("uri", out var u) ? u.GetString() ?? "" : "";
+                    if (string.IsNullOrEmpty(uri) ||
+                        uri.StartsWith("place:", StringComparison.OrdinalIgnoreCase) ||
+                        uri.StartsWith("about:", StringComparison.OrdinalIgnoreCase))
+                        return null;
+                    return new BookmarkNode { Name = string.IsNullOrEmpty(name) ? uri : name, Url = uri };
+                }
+                if (type == "text/x-moz-place-container")
+                {
+                    var folder = new BookmarkNode { Name = name };
+                    if (el.TryGetProperty("children", out var children))
+                        foreach (var child in children.EnumerateArray())
+                        {
+                            var parsed = ParseGeckoNode(child);
+                            if (parsed != null) folder.Children.Add(parsed);
+                        }
+                    return folder;
+                }
+                return null;  // separator or unrecognised type
+            }
+
+            // Root is the placesRoot container; its direct children are the top-level sections
+            if (doc.RootElement.TryGetProperty("children", out var topChildren))
+                foreach (var child in topChildren.EnumerateArray())
+                {
+                    var node = ParseGeckoNode(child);
+                    if (node != null && node.CountLeaves() > 0)
+                        result.Add(node);
+                }
+        }
+        catch { }
+
+        return result;
+    }
+
+    /// <summary>Decompresses an LZ4 block-format payload (no frame header).</summary>
+    private static byte[] DecompressLz4Block(ReadOnlySpan<byte> src, int outputSize)
+    {
+        var dst = new byte[outputSize];
+        int sPos = 0, dPos = 0;
+
+        while (sPos < src.Length && dPos < outputSize)
+        {
+            byte token = src[sPos++];
+
+            // Literals
+            int litLen = (token >> 4) & 0xF;
+            if (litLen == 15)
+            {
+                byte extra;
+                do { extra = src[sPos++]; litLen += extra; } while (extra == 255);
+            }
+            src.Slice(sPos, litLen).CopyTo(dst.AsSpan(dPos));
+            sPos += litLen;
+            dPos += litLen;
+
+            if (sPos >= src.Length) break;  // final sequence has no match portion
+
+            // Match offset (little-endian 16-bit)
+            int offset = src[sPos] | (src[sPos + 1] << 8);
+            sPos += 2;
+
+            // Match length: base is 4, plus token low nibble, plus optional extension bytes
+            int matchLen = 4 + (token & 0xF);
+            if ((token & 0xF) == 15)
+            {
+                byte extra;
+                do { extra = src[sPos++]; matchLen += extra; } while (extra == 255);
+            }
+
+            // Copy match — may overlap with current write position, so byte-by-byte
+            int matchSrc = dPos - offset;
+            for (int i = 0; i < matchLen; i++)
+                dst[dPos++] = dst[matchSrc++];
+        }
+
+        return dst;
+    }
+
+    private async void ImportBookmarks_Click(object sender, RoutedEventArgs e)
+    {
+        var allBrowsers = GetInstalledBrowsers();
+
+        if (allBrowsers.Count == 0)
+        {
+            var d = new ContentDialog
+            {
+                XamlRoot = XamlRoot,
+                Title = "No Supported Browsers Found",
+                Content = "No supported browsers were found. Bookmark import supports Microsoft Edge, Google Chrome, Brave, Vivaldi, Chromium, Firefox, Zen, Waterfox, and LibreWolf.",
+                CloseButtonText = "OK"
+            };
+            await d.ShowAsync();
+            return;
+        }
+
+        KnownBrowser? lastBrowser = null;
+        BrowserProfile? lastProfile = null;
+
+        while (true)
+        {
+            var step1 = await ShowBookmarkBrowserPickerAsync(allBrowsers, lastBrowser, lastProfile);
+            if (step1 == null) return;
+            (lastBrowser, lastProfile) = step1.Value;
+
+            // Gecko profiles store the full profile path in DirectoryName; Chromium stores a relative subdirectory name
+            string profileDir = lastBrowser.Engine == BrowserEngine.Gecko
+                ? lastProfile.DirectoryName
+                : Path.Combine(lastBrowser.ProfileDataDir, lastProfile.DirectoryName);
+
+            var bookmarkRoots = lastBrowser.Engine == BrowserEngine.Gecko
+                ? ReadGeckoBookmarks(profileDir)
+                : ReadChromiumBookmarks(profileDir);
+
+            if (bookmarkRoots.Count == 0 || bookmarkRoots.Sum(r => r.CountLeaves()) == 0)
+            {
+                var d = new ContentDialog
+                {
+                    XamlRoot = XamlRoot,
+                    Title = "No Bookmarks Found",
+                    Content = $"No web bookmarks were found in the selected {lastBrowser.DisplayName} profile.",
+                    CloseButtonText = "OK"
+                };
+                await d.ShowAsync();
+                continue;
+            }
+
+            var (selected, goBack) = await ShowBookmarkSelectorAsync(bookmarkRoots);
+            if (goBack) continue;
+            if (selected == null || selected.Count == 0) return;
+
+            var newItems = selected
+                .Select(b => new LauncherItem { Name = b.Name, Path = b.Url!, IsWebsite = true })
+                .ToList();
+
+            foreach (var item in newItems)
+                item.NormalizeGlyph();
+
+            foreach (var item in newItems)
+                CurrentItems.Add(item);
+
+            SaveAndUpdateTaskbar();
+            await FaviconService.FetchMissingItemIconsAsync(newItems);
+            SettingsManager.SaveSettings();
+            FlyoutWindow.InvalidateItems();
+            return;
+        }
+    }
+
+    /// <summary>
+    /// Shows a dialog for the user to pick a browser and profile.
+    /// Returns null if the user cancels. Pre-populates selections when returning via Back.
+    /// </summary>
+    private async Task<(KnownBrowser Browser, BrowserProfile Profile)?> ShowBookmarkBrowserPickerAsync(
+        List<KnownBrowser> browsers, KnownBrowser? defaultBrowser, BrowserProfile? defaultProfile)
+    {
+        var browserCombo = new ComboBox
+        {
+            PlaceholderText = "Select browser",
+            HorizontalAlignment = HorizontalAlignment.Stretch
+        };
+        foreach (var b in browsers)
+            browserCombo.Items.Add(b.DisplayName);
+
+        var profileCombo = new ComboBox
+        {
+            PlaceholderText = "Select profile",
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            IsEnabled = false
+        };
+
+        List<BrowserProfile> currentProfiles = [];
+
+        var dialog = new ContentDialog
+        {
+            XamlRoot = XamlRoot,
+            Title = "Import Browser Bookmarks",
+            PrimaryButtonText = "Next",
+            CloseButtonText = "Cancel",
+            DefaultButton = ContentDialogButton.Primary,
+            IsPrimaryButtonEnabled = false
+        };
+
+        void PopulateProfiles()
+        {
+            profileCombo.Items.Clear();
+            profileCombo.IsEnabled = false;
+            if (browserCombo.SelectedIndex < 0) { currentProfiles = []; return; }
+
+            var browser = browsers[browserCombo.SelectedIndex];
+            currentProfiles = GetBrowserProfiles(browser.ProfileDataDir, browser.Engine);
+            if (currentProfiles.Count == 0)
+            {
+                profileCombo.PlaceholderText = "No profiles found";
+                dialog.IsPrimaryButtonEnabled = false;
+                return;
+            }
+            foreach (var p in currentProfiles)
+                profileCombo.Items.Add(p.DisplayName);
+            profileCombo.IsEnabled = true;
+            profileCombo.SelectedIndex = 0;
+        }
+
+        browserCombo.SelectionChanged += (_, _) =>
+        {
+            PopulateProfiles();
+            dialog.IsPrimaryButtonEnabled = profileCombo.SelectedIndex >= 0;
+        };
+        profileCombo.SelectionChanged += (_, _) =>
+        {
+            dialog.IsPrimaryButtonEnabled = browserCombo.SelectedIndex >= 0 && profileCombo.SelectedIndex >= 0;
+        };
+
+        // Pre-select defaults when the user navigates Back from the bookmark picker
+        if (defaultBrowser != null)
+        {
+            int idx = browsers.FindIndex(b => b.DisplayName == defaultBrowser.DisplayName);
+            if (idx >= 0)
+            {
+                browserCombo.SelectedIndex = idx; // fires SelectionChanged → PopulateProfiles()
+                if (defaultProfile != null)
+                {
+                    int pidx = currentProfiles.FindIndex(p => p.DirectoryName == defaultProfile.DirectoryName);
+                    if (pidx >= 0) profileCombo.SelectedIndex = pidx;
+                }
+            }
+        }
+
+        var browserGroup = new StackPanel { Spacing = 4 };
+        browserGroup.Children.Add(new TextBlock { Text = "Browser", FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
+        browserGroup.Children.Add(browserCombo);
+
+        var profileGroup = new StackPanel { Spacing = 4 };
+        profileGroup.Children.Add(new TextBlock { Text = "Profile", FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
+        profileGroup.Children.Add(profileCombo);
+
+        var content = new StackPanel { Spacing = 16, MinWidth = 380 };
+        content.Children.Add(new TextBlock
+        {
+            Text = "Select a browser and profile to import bookmarks from.",
+            TextWrapping = TextWrapping.WrapWholeWords,
+            Opacity = 0.7
+        });
+        content.Children.Add(browserGroup);
+        content.Children.Add(profileGroup);
+
+        dialog.Content = content;
+
+        var result = await dialog.ShowAsync();
+        if (result != ContentDialogResult.Primary) return null;
+        if (browserCombo.SelectedIndex < 0 || profileCombo.SelectedIndex < 0) return null;
+
+        return (browsers[browserCombo.SelectedIndex], currentProfiles[profileCombo.SelectedIndex]);
+    }
+
+    /// <summary>
+    /// Shows a TreeView dialog for selecting bookmarks from a folder hierarchy.
+    /// Returns (selected URL nodes, goBack=false) on confirm, (null, goBack=true) on Back,
+    /// or (null, goBack=false) on Cancel.
+    /// </summary>
+    private async Task<(List<BookmarkNode>? Selected, bool GoBack)> ShowBookmarkSelectorAsync(
+        List<BookmarkNode> roots)
+    {
+        var nodeMap = new Dictionary<TreeViewNode, BookmarkNode>();
+
+        TreeViewNode MakeNode(BookmarkNode bm)
+        {
+            string label = bm.IsFolder
+                ? $"{bm.Name}  ({bm.CountLeaves()})"
+                : bm.Name;
+            var node = new TreeViewNode { Content = label, IsExpanded = true };
+            nodeMap[node] = bm;
+            foreach (var child in bm.Children)
+                node.Children.Add(MakeNode(child));
+            return node;
+        }
+
+        var treeView = new TreeView
+        {
+            SelectionMode = TreeViewSelectionMode.Multiple,
+            MaxHeight = 420
+        };
+
+        int totalCount = roots.Sum(r => r.CountLeaves());
+        foreach (var root in roots)
+            treeView.RootNodes.Add(MakeNode(root));
+
+        // Flat list of all nodes for Select All / Deselect All
+        var allNodes = new List<TreeViewNode>();
+        void CollectNodes(IList<TreeViewNode> nodes)
+        {
+            foreach (var n in nodes) { allNodes.Add(n); CollectNodes(n.Children); }
+        }
+        CollectNodes(treeView.RootNodes);
+
+        var selectedCountText = new TextBlock
+        {
+            VerticalAlignment = VerticalAlignment.Center,
+            Opacity = 0.7,
+            FontSize = 13,
+            Text = "None selected"
+        };
+
+        var dialog = new ContentDialog
+        {
+            XamlRoot = XamlRoot,
+            Title = $"Select Bookmarks ({totalCount})",
+            PrimaryButtonText = "Import",
+            SecondaryButtonText = "← Back",
+            CloseButtonText = "Cancel",
+            DefaultButton = ContentDialogButton.Primary,
+            IsPrimaryButtonEnabled = false
+        };
+
+        bool batchUpdating = false;
+
+        void UpdateCount()
+        {
+            int count = treeView.SelectedNodes.Count(n => nodeMap.TryGetValue(n, out var bm) && !bm.IsFolder);
+            selectedCountText.Text = count > 0 ? $"{count} selected" : "None selected";
+            dialog.IsPrimaryButtonEnabled = count > 0;
+            dialog.PrimaryButtonText = count > 0 ? $"Import {count}" : "Import";
+        }
+
+        treeView.SelectionChanged += (_, _) => { if (!batchUpdating) UpdateCount(); };
+
+        var selectAllButton = new HyperlinkButton { Content = "Select All", Padding = new Thickness(0) };
+        var deselectAllButton = new HyperlinkButton { Content = "Deselect All", Padding = new Thickness(0) };
+
+        selectAllButton.Click += (_, _) =>
+        {
+            batchUpdating = true;
+            treeView.SelectedNodes.Clear();
+            foreach (var n in allNodes) treeView.SelectedNodes.Add(n);
+            batchUpdating = false;
+            UpdateCount();
+        };
+        deselectAllButton.Click += (_, _) =>
+        {
+            batchUpdating = true;
+            treeView.SelectedNodes.Clear();
+            batchUpdating = false;
+            UpdateCount();
+        };
+
+        var toolRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+        toolRow.Children.Add(selectAllButton);
+        toolRow.Children.Add(new TextBlock { Text = "·", VerticalAlignment = VerticalAlignment.Center, Opacity = 0.4 });
+        toolRow.Children.Add(deselectAllButton);
+        toolRow.Children.Add(new TextBlock { Text = "·", VerticalAlignment = VerticalAlignment.Center, Opacity = 0.4 });
+        toolRow.Children.Add(selectedCountText);
+
+        var content = new StackPanel { Spacing = 8, MinWidth = 480 };
+        content.Children.Add(toolRow);
+        content.Children.Add(treeView);
+
+        dialog.Content = content;
+
+        var result = await dialog.ShowAsync();
+
+        if (result == ContentDialogResult.Secondary) return (null, true);   // Back
+        if (result != ContentDialogResult.Primary) return (null, false);    // Cancel
+
+        var selected = treeView.SelectedNodes
+            .Where(n => nodeMap.TryGetValue(n, out var bm) && !bm.IsFolder)
+            .Select(n => nodeMap[n])
+            .ToList();
+
+        return (selected, false);
     }
 }

@@ -107,7 +107,8 @@
                     Loaded="ItemCard_Loaded"
                     PointerEntered="ItemCard_PointerEntered" PointerExited="ItemCard_PointerExited">
                 <StackPanel Tag="GroupRoot" Loaded="GroupRoot_Loaded">
-                    <Grid ColumnSpacing="8" Padding="12,10">
+                    <Grid ColumnSpacing="8" Padding="12,10"
+                          PointerEntered="GroupHeader_PointerEntered" PointerExited="GroupHeader_PointerExited">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="Auto"/>
                             <ColumnDefinition Width="Auto"/>
@@ -266,6 +267,12 @@
                         <StackPanel Orientation="Horizontal" Spacing="8">
                             <FontIcon Glyph="&#xE8C1;" FontSize="14"/>
                             <TextBlock Text="Add Column Break"/>
+                        </StackPanel>
+                    </Button>
+                    <Button Click="ImportBookmarks_Click">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <FontIcon Glyph="&#xE8A1;" FontSize="14"/>
+                            <TextBlock Text="Import Bookmarks..."/>
                         </StackPanel>
                     </Button>
                 </StackPanel>
