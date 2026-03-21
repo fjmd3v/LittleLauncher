@@ -13,9 +13,11 @@ App.xaml  →  MainWindow (invisible, owns tray icon)
                       └── AboutPage
 ```
 
-## LauncherItemsPage drag-and-drop
+## LauncherItemsPage multi-column layout and drag-and-drop
 
-The Launcher Items settings page supports full cross-list drag-and-drop: items can be dragged between the top-level list and group child lists, between different groups, and out of groups via a drop zone. All ListViews use `CanDragItems="True"` with custom `DragOver`/`Drop` handlers — WinUI 3's `CanReorderItems` is intentionally avoided because it takes full internal control of drag events and cannot support cross-collection moves. See `.github/instructions/drag-drop.instructions.md` for implementation details.
+The Launcher Items settings page renders items in a multi-column `Grid` (`ColumnsPanel`). The flat `Items` collection is split at `IsColumnBreak` sentinel items into per-column `ObservableCollection<LauncherItem>` lists by `BuildColumnLists()`. Each column gets its own `ListView` (fixed 280px wide), with column headers showing "Column N" and a remove button (except column 1). Users add columns via "Add Column" and remove them via the column header delete button (which merges items into the previous column). Each item/group card has a `...` context menu button (visible on hover via Opacity toggling) with Move up/down, Move to…, Edit, and Remove actions.
+
+Drag-and-drop supports cross-column and cross-group moves: items can be dragged between columns, between columns and group child lists, and out of groups via a drop zone. All ListViews use `CanDragItems="True"` with custom `DragOver`/`Drop` handlers — WinUI 3's `CanReorderItems` is intentionally avoided because it takes full internal control of drag events and cannot support cross-collection moves. After drag operations, `SyncColumnsToFlatList()` writes the column lists back to the flat collection. See `.github/instructions/drag-drop.instructions.md` for implementation details.
 
 ## Launch modes
 

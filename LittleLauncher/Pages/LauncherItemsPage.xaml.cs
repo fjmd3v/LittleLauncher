@@ -24,14 +24,12 @@ public class LauncherItemTemplateSelector : DataTemplateSelector
 {
     public DataTemplate? LauncherItemTemplate { get; set; }
     public DataTemplate? GroupItemTemplate { get; set; }
-    public DataTemplate? ColumnBreakItemTemplate { get; set; }
 
     protected override DataTemplate? SelectTemplateCore(object item)
     {
         if (item is LauncherItem li)
         {
             if (li.IsGroup) return GroupItemTemplate;
-            if (li.IsColumnBreak) return ColumnBreakItemTemplate;
         }
         return LauncherItemTemplate;
     }
@@ -73,10 +71,13 @@ public partial class LauncherItemsPage : Page
             ? (Microsoft.UI.Xaml.Media.Brush)b
             : new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.DodgerBlue);
 
+    // -- Column-based rendering state --
+    private List<ObservableCollection<LauncherItem>> _columnLists = [];
+
     public LauncherItemsPage()
     {
         InitializeComponent();
-        RefreshList();
+        RebuildColumns();
         Loaded += LauncherItemsPage_Loaded;
     }
 
@@ -90,14 +91,12 @@ public partial class LauncherItemsPage : Page
         _isReadOnly = TargetLauncher is { IsShared: true, IsSharedOwner: false };
         AddButtonsToolbar.Visibility = _isReadOnly ? Visibility.Collapsed : Visibility.Visible;
         ImportButton.Visibility = _isReadOnly ? Visibility.Collapsed : Visibility.Visible;
-        ItemsList.CanDragItems = !_isReadOnly;
-        ItemsList.AllowDrop = !_isReadOnly;
         if (_isReadOnly)
             PageSubtitle.Text = "These items are managed by the shared launcher owner and cannot be edited here.";
         else
             PageSubtitle.Text = "Add, edit, or remove apps and websites from your little launcher. Drag items to reorder.";
 
-        RefreshList();
+        RebuildColumns();
     }
 
     private void BackToLayouts_Click(object sender, RoutedEventArgs e)
@@ -117,14 +116,147 @@ public partial class LauncherItemsPage : Page
         }
     }
 
-    private void RefreshList()
+    /// <summary>
+    /// Splits CurrentItems at column break sentinels into separate ObservableCollections
+    /// and renders each as a ListView column inside ColumnsPanel.
+    /// </summary>
+    private void RebuildColumns()
     {
-        ItemsList.ItemsSource = null;
-        ItemsList.ItemsSource = CurrentItems;
+        _columnLists = BuildColumnLists();
+        ColumnsPanel.Children.Clear();
+        ColumnsPanel.ColumnDefinitions.Clear();
+        ColumnsPanel.RowDefinitions.Clear();
+
+        // Set up column definitions in the ColumnsPanel Grid
+        for (int c = 0; c < _columnLists.Count; c++)
+        {
+            ColumnsPanel.ColumnDefinitions.Add(new ColumnDefinition
+            {
+                Width = _columnLists.Count > 1 ? new GridLength(280) : new GridLength(1, GridUnitType.Star)
+            });
+        }
+        // Two rows: Auto for header, Star for the ListView
+        ColumnsPanel.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        ColumnsPanel.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        ColumnsPanel.ColumnSpacing = _columnLists.Count > 1 ? 12 : 0;
+
+        // Single column caps at 1000px; multi-column uses fixed widths so no cap needed
+        RootGrid.MaxWidth = _columnLists.Count > 1 ? double.PositiveInfinity : 1000;
+
+        for (int colIdx = 0; colIdx < _columnLists.Count; colIdx++)
+        {
+            var colItems = _columnLists[colIdx];
+
+            // Column header (shown when multiple columns exist)
+            if (_columnLists.Count > 1)
+            {
+                var headerGrid = new Grid { Margin = new Thickness(0, 0, 0, 4) };
+                headerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                headerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+                var headerText = new TextBlock
+                {
+                    Text = $"Column {colIdx + 1}",
+                    FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                    FontSize = 13,
+                    Opacity = 0.6,
+                    VerticalAlignment = VerticalAlignment.Center
+                };
+                Grid.SetColumn(headerText, 0);
+                headerGrid.Children.Add(headerText);
+
+                if (!_isReadOnly && colIdx > 0)
+                {
+                    var removeColBtn = new Button
+                    {
+                        Content = new FontIcon { Glyph = "\uE74D", FontSize = 12 },
+                        Padding = new Thickness(6, 4, 6, 4),
+                        Tag = colIdx
+                    };
+                    ToolTipService.SetToolTip(removeColBtn, "Remove column (items move to previous column)");
+                    removeColBtn.Click += RemoveColumn_Click;
+                    Grid.SetColumn(removeColBtn, 1);
+                    headerGrid.Children.Add(removeColBtn);
+                }
+                Grid.SetRow(headerGrid, 0);
+                Grid.SetColumn(headerGrid, colIdx);
+                ColumnsPanel.Children.Add(headerGrid);
+            }
+
+            // ListView for this column
+            var lv = new ListView
+            {
+                CanDragItems = !_isReadOnly,
+                AllowDrop = !_isReadOnly,
+                SelectionMode = ListViewSelectionMode.None,
+                Tag = colIdx
+            };
+            lv.ItemTemplateSelector = (DataTemplateSelector)Resources["ItemTemplateSelector"];
+            lv.ItemContainerStyle = CreateItemContainerStyle();
+            lv.ItemsSource = colItems;
+            lv.DragItemsStarting += ColumnListView_DragItemsStarting;
+            lv.DragOver += ColumnListView_DragOver;
+            lv.DragLeave += ColumnListView_DragLeave;
+            lv.Drop += ColumnListView_Drop;
+            lv.DragItemsCompleted += ColumnListView_DragItemsCompleted;
+
+            Grid.SetRow(lv, 1);
+            Grid.SetColumn(lv, colIdx);
+            ColumnsPanel.Children.Add(lv);
+        }
+    }
+
+    private static Style CreateItemContainerStyle()
+    {
+        var style = new Style(typeof(ListViewItem));
+        style.Setters.Add(new Setter(ListViewItem.PaddingProperty, new Thickness(0)));
+        style.Setters.Add(new Setter(ListViewItem.MarginProperty, new Thickness(0)));
+        style.Setters.Add(new Setter(ListViewItem.HorizontalContentAlignmentProperty, HorizontalAlignment.Stretch));
+        return style;
     }
 
     /// <summary>
-    /// Refreshes the settings page ListView if the page is currently loaded.
+    /// Splits CurrentItems at IsColumnBreak sentinels into per-column lists.
+    /// Column break items are excluded from the resulting lists.
+    /// </summary>
+    private static List<ObservableCollection<LauncherItem>> BuildColumnLists()
+    {
+        var columns = new List<ObservableCollection<LauncherItem>>();
+        var current = new ObservableCollection<LauncherItem>();
+        columns.Add(current);
+
+        foreach (var item in CurrentItems)
+        {
+            if (item.IsColumnBreak)
+            {
+                current = new ObservableCollection<LauncherItem>();
+                columns.Add(current);
+                continue;
+            }
+            current.Add(item);
+        }
+        return columns;
+    }
+
+    /// <summary>
+    /// Writes the column lists back to the flat CurrentItems collection,
+    /// inserting column break sentinels between columns.
+    /// </summary>
+    private void SyncColumnsToFlatList()
+    {
+        var items = CurrentItems;
+        items.Clear();
+        for (int c = 0; c < _columnLists.Count; c++)
+        {
+            if (c > 0)
+                items.Add(LauncherItem.CreateColumnBreak());
+            foreach (var item in _columnLists[c])
+                items.Add(item);
+        }
+    }
+
+    /// <summary>
+    /// Refreshes the settings page columns if the page is currently loaded.
     /// Called from FlyoutWindow after drag-reorder.
     /// </summary>
     internal static void NotifyItemsChanged(string? launcherId = null)
@@ -134,35 +266,39 @@ public partial class LauncherItemsPage : Page
         {
             // Only refresh if the page is showing the affected launcher
             if (launcherId == null || TargetLauncher?.Id == launcherId)
-                page.RefreshList();
+                page.RebuildColumns();
         }
     }
 
-    private void ItemsList_DragItemsStarting(object sender, DragItemsStartingEventArgs e)
+    // -- Column ListView drag-and-drop handlers --
+
+    private void ColumnListView_DragItemsStarting(object sender, DragItemsStartingEventArgs e)
     {
-        if (e.Items.FirstOrDefault() is LauncherItem item)
+        if (sender is ListView lv && lv.Tag is int colIdx
+            && e.Items.FirstOrDefault() is LauncherItem item)
         {
             _dragItem = item;
-            _dragSourceCollection = CurrentItems;
+            _dragSourceCollection = _columnLists[colIdx];
             e.Data.RequestedOperation = global::Windows.ApplicationModel.DataTransfer.DataPackageOperation.Move;
         }
     }
 
-    private void ItemsList_DragOver(object sender, DragEventArgs e)
+    private void ColumnListView_DragOver(object sender, DragEventArgs e)
     {
         if (_dragItem == null || _dragSourceCollection == null) return;
+        if (sender is not ListView lv || lv.Tag is not int colIdx) return;
 
         e.AcceptedOperation = global::Windows.ApplicationModel.DataTransfer.DataPackageOperation.Move;
 
-        // Show insertion indicator
-        int dropIndex = GetDropIndex(ItemsList, e);
-        ShowInsertionIndicator(ItemsList, dropIndex);
+        var targetCol = _columnLists[colIdx];
+        int dropIndex = GetDropIndex(lv, e);
+        ShowInsertionIndicator(lv, dropIndex);
 
         e.DragUIOverride.IsCaptionVisible = true;
         e.DragUIOverride.IsGlyphVisible = true;
-        if (dropIndex < CurrentItems.Count)
+        if (dropIndex < targetCol.Count)
         {
-            var targetItem = CurrentItems[dropIndex];
+            var targetItem = targetCol[dropIndex];
             e.DragUIOverride.Caption = $"Move above {targetItem.Name}";
         }
         else
@@ -173,35 +309,37 @@ public partial class LauncherItemsPage : Page
         e.Handled = true;
     }
 
-    private void ItemsList_DragLeave(object sender, DragEventArgs e)
+    private void ColumnListView_DragLeave(object sender, DragEventArgs e)
     {
         ClearInsertionIndicator();
     }
 
-    private void ItemsList_Drop(object sender, DragEventArgs e)
+    private void ColumnListView_Drop(object sender, DragEventArgs e)
     {
         ClearInsertionIndicator();
         if (_dragItem == null || _dragSourceCollection == null) return;
+        if (sender is not ListView lv || lv.Tag is not int colIdx) return;
 
-        var items = CurrentItems;
-        int dropIndex = GetDropIndex(ItemsList, e);
+        var targetCol = _columnLists[colIdx];
+        int dropIndex = GetDropIndex(lv, e);
 
-        // If reordering within the same list, adjust for the removal shift
-        int originalIndex = _dragSourceCollection == items ? _dragSourceCollection.IndexOf(_dragItem) : -1;
+        // If reordering within the same column, adjust for the removal shift
+        int originalIndex = _dragSourceCollection == targetCol ? _dragSourceCollection.IndexOf(_dragItem) : -1;
         _dragSourceCollection.Remove(_dragItem);
         if (originalIndex >= 0 && originalIndex < dropIndex)
             dropIndex--;
-        if (dropIndex > items.Count) dropIndex = items.Count;
-        items.Insert(dropIndex, _dragItem);
+        if (dropIndex > targetCol.Count) dropIndex = targetCol.Count;
+        targetCol.Insert(dropIndex, _dragItem);
 
         _dragItem = null;
         _dragSourceCollection = null;
 
+        SyncColumnsToFlatList();
         SaveAndUpdateTaskbar();
         e.Handled = true;
     }
 
-    private void ItemsList_DragItemsCompleted(ListViewBase sender, DragItemsCompletedEventArgs args)
+    private void ColumnListView_DragItemsCompleted(ListViewBase sender, DragItemsCompletedEventArgs args)
     {
         ClearInsertionIndicator();
         TopLevelDropZone.Visibility = Visibility.Collapsed;
@@ -267,7 +405,7 @@ public partial class LauncherItemsPage : Page
     {
         if (sender is not Border border || border.Child is not Panel panel) return;
 
-        // For regular items and column breaks, child is a Grid.
+        // For regular items, child is a Grid.
         // For groups, child is a StackPanel (GroupRoot) whose first child is the header Grid.
         Grid? grid = panel as Grid ?? (panel as StackPanel)?.Children.FirstOrDefault() as Grid;
         if (grid == null) return;
@@ -280,16 +418,11 @@ public partial class LauncherItemsPage : Page
             if (_isReadOnly && Grid.GetColumn(fe) == 0 && fe is FontIcon)
                 fe.Visibility = Visibility.Collapsed;
 
-            // Hide action buttons on load; use Opacity so layout height is preserved (no jank on hover)
-            if (Grid.GetColumn(fe) == 3 && fe is StackPanel sp3)
+            // Hide action buttons on load (use Opacity to preserve layout height)
+            if (Grid.GetColumn(fe) == 3 && fe is StackPanel sp)
             {
-                if (_isReadOnly)
-                    sp3.Visibility = Visibility.Collapsed;
-                else
-                {
-                    sp3.Opacity = 0;
-                    sp3.IsHitTestVisible = false;
-                }
+                sp.Opacity = 0;
+                sp.IsHitTestVisible = false;
             }
         }
     }
@@ -301,8 +434,8 @@ public partial class LauncherItemsPage : Page
         {
             if (FindGripIcon(border) is FontIcon grip)
                 grip.Opacity = 0.8;
-            // Group buttons are shown/hidden by GroupHeader_PointerEntered/Exited instead
-            if (!IsGroupCard(border) && FindButtonsPanel(border) is StackPanel buttons)
+            // Show buttons for both regular items and groups
+            if (FindButtonsPanel(border) is StackPanel buttons)
             {
                 buttons.Opacity = 1;
                 buttons.IsHitTestVisible = true;
@@ -318,36 +451,14 @@ public partial class LauncherItemsPage : Page
         {
             if (FindGripIcon(border) is FontIcon grip)
                 grip.Opacity = 0.3;
-            // Group buttons are shown/hidden by GroupHeader_PointerEntered/Exited instead
-            if (!IsGroupCard(border) && FindButtonsPanel(border) is StackPanel buttons)
+            // Hide buttons for both regular items and groups
+            if (FindButtonsPanel(border) is StackPanel buttons)
             {
                 buttons.Opacity = 0;
                 buttons.IsHitTestVisible = false;
             }
         }
         this.ProtectedCursor = _arrowCursor;
-    }
-
-    private void GroupHeader_PointerEntered(object sender, Microsoft.UI.Xaml.Input.PointerRoutedEventArgs e)
-    {
-        if (_isReadOnly) return;
-        var border = FindParentBorder(sender as DependencyObject);
-        if (border != null && FindButtonsPanel(border) is StackPanel buttons)
-        {
-            buttons.Opacity = 1;
-            buttons.IsHitTestVisible = true;
-        }
-    }
-
-    private void GroupHeader_PointerExited(object sender, Microsoft.UI.Xaml.Input.PointerRoutedEventArgs e)
-    {
-        if (_isReadOnly) return;
-        var border = FindParentBorder(sender as DependencyObject);
-        if (border != null && FindButtonsPanel(border) is StackPanel buttons)
-        {
-            buttons.Opacity = 0;
-            buttons.IsHitTestVisible = false;
-        }
     }
 
     private void ItemButtons_PointerEntered(object sender, Microsoft.UI.Xaml.Input.PointerRoutedEventArgs e)
@@ -434,6 +545,121 @@ public partial class LauncherItemsPage : Page
         }
     }
 
+    private void ItemMenu_Click(object sender, RoutedEventArgs e)
+    {
+        if (_isReadOnly) return;
+        if (sender is not FrameworkElement fe || fe.Tag is not LauncherItem item) return;
+        ShowItemContextMenu(fe, item, isGroup: false);
+    }
+
+    private void GroupMenu_Click(object sender, RoutedEventArgs e)
+    {
+        if (_isReadOnly) return;
+        if (sender is not FrameworkElement fe || fe.Tag is not LauncherItem item) return;
+        ShowItemContextMenu(fe, item, isGroup: true);
+    }
+
+    private void ShowItemContextMenu(FrameworkElement anchor, LauncherItem item, bool isGroup)
+    {
+        var flyout = new MenuFlyout();
+
+        var moveUp = new MenuFlyoutItem { Text = "Move up", Icon = new FontIcon { Glyph = "\uE70E" } };
+        moveUp.Click += (s, ev) =>
+        {
+            var parent = FindParentCollection(item);
+            if (parent == null) return;
+            int index = parent.IndexOf(item);
+            if (index > 0) { parent.Move(index, index - 1); SaveAndUpdateTaskbar(); }
+        };
+        flyout.Items.Add(moveUp);
+
+        var moveDown = new MenuFlyoutItem { Text = "Move down", Icon = new FontIcon { Glyph = "\uE70D" } };
+        moveDown.Click += (s, ev) =>
+        {
+            var parent = FindParentCollection(item);
+            if (parent == null) return;
+            int index = parent.IndexOf(item);
+            if (index >= 0 && index < parent.Count - 1) { parent.Move(index, index + 1); SaveAndUpdateTaskbar(); }
+        };
+        flyout.Items.Add(moveDown);
+
+        if (!isGroup)
+        {
+            // Build "Move to..." sub-menu for non-group items
+            var items = CurrentItems;
+            ObservableCollection<LauncherItem>? currentParent = null;
+            LauncherItem? currentGroup = null;
+            foreach (var group in items.Where(i => i.IsGroup))
+            {
+                if (group.Children.Contains(item))
+                {
+                    currentParent = group.Children;
+                    currentGroup = group;
+                    break;
+                }
+            }
+
+            var moveToSub = new MenuFlyoutSubItem { Text = "Move to...", Icon = new FontIcon { Glyph = "\uE8DE" } };
+
+            if (currentParent != null)
+            {
+                var topLevel = new MenuFlyoutItem { Text = "Top Level", Icon = new FontIcon { Glyph = "\uE74B" } };
+                topLevel.Click += (s, ev) =>
+                {
+                    currentParent.Remove(item);
+                    items.Add(item);
+                    SaveAndUpdateTaskbar();
+                };
+                moveToSub.Items.Add(topLevel);
+            }
+
+            foreach (var group in items.Where(i => i.IsGroup))
+            {
+                if (group == currentGroup) continue;
+                var targetGroup = group;
+                var groupOption = new MenuFlyoutItem { Text = group.Name, Icon = new FontIcon { Glyph = "\uF168" } };
+                groupOption.Click += (s, ev) =>
+                {
+                    (currentParent ?? items).Remove(item);
+                    targetGroup.Children.Add(item);
+                    SaveAndUpdateTaskbar();
+                };
+                moveToSub.Items.Add(groupOption);
+            }
+
+            if (moveToSub.Items.Count > 0)
+            {
+                flyout.Items.Add(new MenuFlyoutSeparator());
+                flyout.Items.Add(moveToSub);
+            }
+        }
+
+        flyout.Items.Add(new MenuFlyoutSeparator());
+
+        var edit = new MenuFlyoutItem { Text = "Edit", Icon = new FontIcon { Glyph = "\uE70F" } };
+        edit.Click += async (s, ev) =>
+        {
+            if (item.IsGroup) await ShowGroupDialog(item);
+            else await ShowItemDialog(item);
+        };
+        flyout.Items.Add(edit);
+
+        var remove = new MenuFlyoutItem { Text = "Remove", Icon = new FontIcon { Glyph = "\uE74D" } };
+        remove.Click += (s, ev) =>
+        {
+            var items = CurrentItems;
+            if (!items.Remove(item))
+            {
+                foreach (var group in items.Where(i => i.IsGroup))
+                    if (group.Children.Remove(item)) break;
+            }
+            SaveAndUpdateTaskbar();
+        };
+        flyout.Items.Add(remove);
+
+        flyout.ShowAt(anchor);
+    }
+
     private void MoveItem_Click(object sender, RoutedEventArgs e)
     {
         if (_isReadOnly) return;
@@ -508,10 +734,28 @@ public partial class LauncherItemsPage : Page
         await ShowGroupDialog(null);
     }
 
-    private void ShowAddColumnBreakDialog_Click(object sender, RoutedEventArgs e)
+    private void AddColumn_Click(object sender, RoutedEventArgs e)
     {
         if (_isReadOnly) return;
         CurrentItems.Add(LauncherItem.CreateColumnBreak());
+        RebuildColumns();
+        SaveAndUpdateTaskbar();
+    }
+
+    private void RemoveColumn_Click(object sender, RoutedEventArgs e)
+    {
+        if (_isReadOnly) return;
+        if (sender is not FrameworkElement fe || fe.Tag is not int colIdx) return;
+        if (colIdx <= 0 || colIdx >= _columnLists.Count) return;
+
+        // Move items from the removed column into the previous column
+        var removedCol = _columnLists[colIdx];
+        var prevCol = _columnLists[colIdx - 1];
+        foreach (var item in removedCol)
+            prevCol.Add(item);
+
+        _columnLists.RemoveAt(colIdx);
+        SyncColumnsToFlatList();
         SaveAndUpdateTaskbar();
     }
 
@@ -677,6 +921,7 @@ public partial class LauncherItemsPage : Page
         _dragSourceCollection = null;
         TopLevelDropZone.Visibility = Visibility.Collapsed;
 
+        SyncColumnsToFlatList();
         SaveAndUpdateTaskbar();
         e.Handled = true;
     }
@@ -694,7 +939,8 @@ public partial class LauncherItemsPage : Page
     private void TopLevelDropZone_DragOver(object sender, DragEventArgs e)
     {
         if (_dragItem == null || _dragSourceCollection == null) return;
-        if (_dragSourceCollection == CurrentItems) return;
+        // Only accept drops from group children (not from column lists)
+        if (_columnLists.Contains(_dragSourceCollection)) return;
 
         ClearInsertionIndicator();
         e.AcceptedOperation = global::Windows.ApplicationModel.DataTransfer.DataPackageOperation.Move;
@@ -708,16 +954,19 @@ public partial class LauncherItemsPage : Page
     {
         ClearInsertionIndicator();
         if (_dragItem == null || _dragSourceCollection == null) return;
-        if (_dragSourceCollection == CurrentItems) return;
+        // Only accept drops from group children
+        if (_columnLists.Contains(_dragSourceCollection)) return;
 
-        var items = CurrentItems;
         _dragSourceCollection.Remove(_dragItem);
-        items.Add(_dragItem);
+        // Add to the last column
+        if (_columnLists.Count > 0)
+            _columnLists[^1].Add(_dragItem);
 
         _dragItem = null;
         _dragSourceCollection = null;
         TopLevelDropZone.Visibility = Visibility.Collapsed;
 
+        SyncColumnsToFlatList();
         SaveAndUpdateTaskbar();
         e.Handled = true;
     }
@@ -2065,6 +2314,7 @@ public partial class LauncherItemsPage : Page
         SettingsManager.SaveSettings();
         Services.AutoSyncService.NotifyItemsChanged();
         FlyoutWindow.InvalidateItems(TargetLauncher?.Id);
+        RebuildColumns();
     }
 
     private async void ExportItems_Click(object sender, RoutedEventArgs e)
