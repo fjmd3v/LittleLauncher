@@ -23,18 +23,15 @@ Little Launcher lives in the Windows system tray. Clicking the tray icon opens a
 
 **Key features:**
 
-- **Multiple launchers** — define multiple named launchers, each with its own tray icon, items, and appearance.
-- **System-tray launcher** — a tray icon that opens a flyout popup for shortcuts.
+- **Multiple launchers** — define multiple named launchers, each with its own icon and items.
 - **Application & website shortcuts** — launch any executable or URL with one click from the flyout.
-- **Groups & columns** — organise items into collapsible groups and multi-column layouts.
+- **Groups & columns** — organise items into groups and multi-column layouts.
+- **System-tray icons** — a tray icon that opens a flyout popup for shortcuts.
+- **Taskbar icons** — a companion helper exe (`LauncherShortcut`) can be pinned to the taskbar so one click opens the flyout without needing to find the tray icon.
 - **SSH/SFTP settings sync** — upload/download all launchers to a remote server using SSH.NET.
 - **Shared launchers** — share individual launchers via local/network files or per-launcher SFTP. Owners publish items; subscribers receive read-only copies.
-- **WinUI 3 settings UI** — a native window with Mica backdrop and page-based `NavigationView`.
-- **Taskbar pinning** — a companion helper exe (`LauncherShortcut`) can be pinned to the taskbar so one click opens the flyout without needing to find the tray icon.
-- **Theme support** — follows the Windows system theme or can be set to Light/Dark explicitly.
 - **Export & import** — back up and restore items locally via JSON.
 - **Bookmark import** — import bookmarks directly from Chrome, Edge, Firefox, or any browser's exported HTML bookmarks file into a launcher.
-- **Hover-reveal controls** — item action buttons fade in on hover to keep the list clean and uncluttered.
 
 ## Architecture
 
