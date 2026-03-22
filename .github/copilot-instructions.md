@@ -63,6 +63,7 @@ Release builds AOT-publish the companion exe (`LauncherShortcut`) automatically.
 - CommunityToolkit.Mvvm 8.4.0
 - SSH.NET 2025.1.0
 - NLog 6.1.1
+- Microsoft.Data.Sqlite 9.0.3 (Firefox bookmark import from places.sqlite)
 
 ## Common tasks
 

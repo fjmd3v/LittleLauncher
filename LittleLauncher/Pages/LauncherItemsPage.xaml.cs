@@ -3,6 +3,7 @@ using LittleLauncher.Classes.Settings;
 using LittleLauncher.Models;
 using LittleLauncher.Services;
 using LittleLauncher.Windows;
+using Microsoft.Data.Sqlite;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media.Imaging;
@@ -2439,6 +2440,13 @@ public partial class LauncherItemsPage : Page
 
     // -- Bookmark import --
 
+    /// <summary>Wraps a bookmark label string so TreeView can display it via ToString()
+    /// and we can use reference equality for the ItemInvoked reverse lookup.</summary>
+    private sealed class BookmarkLabel(string text)
+    {
+        public override string ToString() => text;
+    }
+
     /// <summary>Represents a node in a browser bookmark tree — either a folder or a URL bookmark.</summary>
     private sealed class BookmarkNode
     {
@@ -2459,6 +2467,9 @@ public partial class LauncherItemsPage : Page
     {
         var result = new List<BookmarkNode>();
         string path = Path.Combine(profileDir, "Bookmarks");
+        // Newer Chrome versions store bookmarks in "AccountBookmarks" instead of "Bookmarks"
+        if (!File.Exists(path))
+            path = Path.Combine(profileDir, "AccountBookmarks");
         if (!File.Exists(path)) return result;
 
         try
@@ -2519,18 +2530,24 @@ public partial class LauncherItemsPage : Page
 
     /// <summary>
     /// Reads bookmarks from a Firefox/Gecko profile directory using the most recent
-    /// auto-generated jsonlz4 backup (no SQLite dependency required).
+    /// auto-generated jsonlz4 backup, falling back to places.sqlite if no backups exist.
     /// </summary>
     private static List<BookmarkNode> ReadGeckoBookmarks(string profileDir)
     {
         var result = new List<BookmarkNode>();
-        string backupDir = Path.Combine(profileDir, "bookmarkbackups");
-        if (!Directory.Exists(backupDir)) return result;
 
-        string? latestFile = Directory.GetFiles(backupDir, "*.jsonlz4")
-            .OrderByDescending(File.GetLastWriteTimeUtc)
-            .FirstOrDefault();
-        if (latestFile == null) return result;
+        // Try jsonlz4 backup first
+        string backupDir = Path.Combine(profileDir, "bookmarkbackups");
+        string? latestFile = Directory.Exists(backupDir)
+            ? Directory.GetFiles(backupDir, "*.jsonlz4")
+                .OrderByDescending(File.GetLastWriteTimeUtc)
+                .FirstOrDefault()
+            : null;
+
+        // Fall back to places.sqlite when no jsonlz4 backups exist
+        if (latestFile == null)
+            return ReadGeckoBookmarksFromSqlite(profileDir);
+
 
         try
         {
@@ -2632,6 +2649,108 @@ public partial class LauncherItemsPage : Page
         }
 
         return dst;
+    }
+
+    /// <summary>Reads bookmarks from a Firefox/Gecko places.sqlite database.</summary>
+    private static List<BookmarkNode> ReadGeckoBookmarksFromSqlite(string profileDir)
+    {
+        var result = new List<BookmarkNode>();
+        string dbPath = Path.Combine(profileDir, "places.sqlite");
+        if (!File.Exists(dbPath)) return result;
+
+        // Copy to temp to avoid SQLite lock conflicts with a running browser
+        string tempDb = Path.Combine(Path.GetTempPath(), $"ll_places_{Guid.NewGuid():N}.sqlite");
+        try
+        {
+            File.Copy(dbPath, tempDb, overwrite: true);
+
+            using var conn = new SqliteConnection($"Data Source={tempDb};Mode=ReadOnly");
+            conn.Open();
+
+            // Build folder hierarchy from moz_bookmarks + moz_places
+            // type=1 → bookmark, type=2 → folder; parent links form the tree
+            // Well-known root folder IDs: 1=Places root, 2=Bookmarks Menu, 3=Toolbar, 4=Tags, 5=Other Bookmarks
+            var folders = new Dictionary<long, BookmarkNode>();
+            var childrenMap = new Dictionary<long, List<(long id, int type, string title, string? url, long parent)>>();
+
+            using (var cmd = conn.CreateCommand())
+            {
+                cmd.CommandText = """
+                    SELECT b.id, b.type, COALESCE(b.title, ''), p.url, b.parent, b.position
+                    FROM moz_bookmarks b
+                    LEFT JOIN moz_places p ON b.fk = p.id
+                    WHERE b.type IN (1, 2)
+                    ORDER BY b.position
+                    """;
+
+                using var reader = cmd.ExecuteReader();
+                while (reader.Read())
+                {
+                    long id = reader.GetInt64(0);
+                    int type = reader.GetInt32(1);
+                    string title = reader.GetString(2);
+                    string? url = reader.IsDBNull(3) ? null : reader.GetString(3);
+                    long parent = reader.GetInt64(4);
+
+                    if (type == 2) // folder
+                        folders[id] = new BookmarkNode { Name = title };
+
+                    if (!childrenMap.TryGetValue(parent, out var list))
+                    {
+                        list = [];
+                        childrenMap[parent] = list;
+                    }
+                    list.Add((id, type, title, url, parent));
+                }
+            }
+
+            // Recursively build tree
+            void BuildChildren(BookmarkNode parentNode, long parentId)
+            {
+                if (!childrenMap.TryGetValue(parentId, out var children)) return;
+                foreach (var (id, type, title, url, _) in children)
+                {
+                    if (type == 2 && folders.TryGetValue(id, out var folder))
+                    {
+                        BuildChildren(folder, id);
+                        if (folder.CountLeaves() > 0)
+                            parentNode.Children.Add(folder);
+                    }
+                    else if (type == 1 && !string.IsNullOrEmpty(url))
+                    {
+                        if (url.StartsWith("place:", StringComparison.OrdinalIgnoreCase) ||
+                            url.StartsWith("about:", StringComparison.OrdinalIgnoreCase))
+                            continue;
+                        string name = string.IsNullOrEmpty(title) ? url : title;
+                        parentNode.Children.Add(new BookmarkNode { Name = name, Url = url });
+                    }
+                }
+            }
+
+            // Well-known top-level folders under the Places root (id=1)
+            var topLevel = new (long id, string displayName)[]
+            {
+                (2, "Bookmarks Menu"),
+                (3, "Bookmarks Toolbar"),
+                (5, "Other Bookmarks"),
+            };
+
+            foreach (var (folderId, displayName) in topLevel)
+            {
+                if (!folders.TryGetValue(folderId, out var folder)) continue;
+                folder = new BookmarkNode { Name = displayName };
+                BuildChildren(folder, folderId);
+                if (folder.CountLeaves() > 0)
+                    result.Add(folder);
+            }
+        }
+        catch { }
+        finally
+        {
+            try { File.Delete(tempDb); } catch { }
+        }
+
+        return result;
     }
 
     private async void ImportBookmarks_Click(object sender, RoutedEventArgs e)
@@ -2819,14 +2938,17 @@ public partial class LauncherItemsPage : Page
         List<BookmarkNode> roots)
     {
         var nodeMap = new Dictionary<TreeViewNode, BookmarkNode>();
+        var contentToNode = new Dictionary<BookmarkLabel, TreeViewNode>();
 
-        TreeViewNode MakeNode(BookmarkNode bm)
+        TreeViewNode MakeNode(BookmarkNode bm, bool isRoot = false)
         {
-            string label = bm.IsFolder
+            string text = bm.IsFolder
                 ? $"{bm.Name}  ({bm.CountLeaves()})"
                 : bm.Name;
-            var node = new TreeViewNode { Content = label, IsExpanded = true };
+            var label = new BookmarkLabel(text);
+            var node = new TreeViewNode { Content = label, IsExpanded = isRoot };
             nodeMap[node] = bm;
+            contentToNode[label] = node;
             foreach (var child in bm.Children)
                 node.Children.Add(MakeNode(child));
             return node;
@@ -2840,7 +2962,18 @@ public partial class LauncherItemsPage : Page
 
         int totalCount = roots.Sum(r => r.CountLeaves());
         foreach (var root in roots)
-            treeView.RootNodes.Add(MakeNode(root));
+            treeView.RootNodes.Add(MakeNode(root, isRoot: true));
+
+        // Clicking a folder name toggles expand/collapse
+        treeView.ItemInvoked += (_, args) =>
+        {
+            if (args.InvokedItem is BookmarkLabel invokedLabel &&
+                contentToNode.TryGetValue(invokedLabel, out var node) &&
+                nodeMap.TryGetValue(node, out var bm) && bm.IsFolder)
+            {
+                node.IsExpanded = !node.IsExpanded;
+            }
+        };
 
         // Flat list of all nodes for Select All / Deselect All
         var allNodes = new List<TreeViewNode>();

@@ -143,6 +143,39 @@ jobs:
       contents: write
 
     steps:
+      - name: Checkout (for git log)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Generate release notes from commits
+        id: notes
+        run: |
+          CURRENT_TAG="${GITHUB_REF#refs/tags/}"
+          PREVIOUS_TAG=$(git tag --sort=-v:refname | grep -E '^v' | sed -n '2p')
+
+          if [ -n "$PREVIOUS_TAG" ]; then
+            RANGE="${PREVIOUS_TAG}..${CURRENT_TAG}"
+          else
+            RANGE="${CURRENT_TAG}"
+          fi
+
+          BODY=$(git log "$RANGE" --pretty=format:"- %s" --no-merges \
+            | grep -vi "^- Bump version" \
+            | grep -vi "^- Merge branch")
+
+          if [ -z "$BODY" ]; then
+            BODY="- Maintenance release (no notable changes)"
+          fi
+
+          {
+            echo "RELEASE_BODY<<RELEASE_EOF"
+            echo "## What's Changed"
+            echo ""
+            echo "$BODY"
+            echo "RELEASE_EOF"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Download portable build artifacts
         uses: actions/download-artifact@v4
         with:
@@ -171,4 +204,5 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: release/*
+          body: ${{ steps.notes.outputs.RELEASE_BODY }}
           generate_release_notes: true

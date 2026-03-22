@@ -46,7 +46,7 @@ Pushing a tag matching `v*` triggers `.github/workflows/build-msix.yml` which:
 2. Stamps the MSIX manifest with the four-part version
 3. Builds for **x64** and **ARM64** (`dotnet build -c Release`)
 4. Builds MSI installers via WiX (version injected from props)
-5. Creates a **GitHub Release** with auto-generated release notes
+5. Creates a **GitHub Release** with auto-generated release notes (commit summary + full changelog link)
 6. Attaches four artifacts: `LittleLauncher-{x64,ARM64}-Setup.msi` and `LittleLauncher-{x64,ARM64}-portable.zip`
 
 ## How to release

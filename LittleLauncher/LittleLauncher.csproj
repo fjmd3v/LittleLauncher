@@ -20,6 +20,7 @@
   <!-- NuGet packages ────────────────────────────────────────────── -->
   <ItemGroup>
     <!-- WinUI 3 (Windows App SDK) — Fluent Design, Mica, NavigationView -->
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="9.0.3" />
     <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.8.260209005" />
 
     <!-- System tray icon for WinUI 3 -->
@@ -51,11 +52,9 @@
       <_FlyoutPublishDir>$(MSBuildThisFileDirectory)..\LauncherShortcut\bin\aot-publish\$(_FlyoutRid)\</_FlyoutPublishDir>
     </PropertyGroup>
     <Exec Command="dotnet publish &quot;$(MSBuildThisFileDirectory)..\LauncherShortcut\LauncherShortcut.csproj&quot; -c Release -r $(_FlyoutRid) -o &quot;$(_FlyoutPublishDir)&quot;" />
-    <Copy SourceFiles="$(_FlyoutPublishDir)LittleLauncherFlyout.exe"
-          DestinationFolder="$(OutputPath)" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="$(_FlyoutPublishDir)LittleLauncherFlyout.exe" DestinationFolder="$(OutputPath)" SkipUnchangedFiles="true" />
     <!-- Clean up stale managed files from previous Debug copies -->
-    <Delete Files="$(OutputPath)LittleLauncherFlyout.dll;$(OutputPath)LittleLauncherFlyout.deps.json;$(OutputPath)LittleLauncherFlyout.runtimeconfig.json"
-            Condition="Exists('$(OutputPath)LittleLauncherFlyout.dll')" />
+    <Delete Files="$(OutputPath)LittleLauncherFlyout.dll;$(OutputPath)LittleLauncherFlyout.deps.json;$(OutputPath)LittleLauncherFlyout.runtimeconfig.json" Condition="Exists('$(OutputPath)LittleLauncherFlyout.dll')" />
   </Target>
 
   <Target Name="CopyFlyoutExeDebug" AfterTargets="Build" Condition="'$(Configuration)' == 'Debug'">
@@ -65,13 +64,9 @@
       <FlyoutOutputDirFallback>..\LauncherShortcut\bin\$(Configuration)\net10.0-windows10.0.22000.0\</FlyoutOutputDirFallback>
     </PropertyGroup>
     <!-- Primary path (platform-specific) -->
-    <Copy SourceFiles="$(FlyoutOutputDir)LittleLauncherFlyout.exe;$(FlyoutOutputDir)LittleLauncherFlyout.dll;$(FlyoutOutputDir)LittleLauncherFlyout.deps.json;$(FlyoutOutputDir)LittleLauncherFlyout.runtimeconfig.json"
-          DestinationFolder="$(OutputPath)" SkipUnchangedFiles="true"
-          Condition="Exists('$(FlyoutOutputDir)LittleLauncherFlyout.exe')" />
+    <Copy SourceFiles="$(FlyoutOutputDir)LittleLauncherFlyout.exe;$(FlyoutOutputDir)LittleLauncherFlyout.dll;$(FlyoutOutputDir)LittleLauncherFlyout.deps.json;$(FlyoutOutputDir)LittleLauncherFlyout.runtimeconfig.json" DestinationFolder="$(OutputPath)" SkipUnchangedFiles="true" Condition="Exists('$(FlyoutOutputDir)LittleLauncherFlyout.exe')" />
     <!-- Fallback path (AnyCPU) -->
-    <Copy SourceFiles="$(FlyoutOutputDirFallback)LittleLauncherFlyout.exe;$(FlyoutOutputDirFallback)LittleLauncherFlyout.dll;$(FlyoutOutputDirFallback)LittleLauncherFlyout.deps.json;$(FlyoutOutputDirFallback)LittleLauncherFlyout.runtimeconfig.json"
-          DestinationFolder="$(OutputPath)" SkipUnchangedFiles="true"
-          Condition="!Exists('$(FlyoutOutputDir)LittleLauncherFlyout.exe') And Exists('$(FlyoutOutputDirFallback)LittleLauncherFlyout.exe')" />
+    <Copy SourceFiles="$(FlyoutOutputDirFallback)LittleLauncherFlyout.exe;$(FlyoutOutputDirFallback)LittleLauncherFlyout.dll;$(FlyoutOutputDirFallback)LittleLauncherFlyout.deps.json;$(FlyoutOutputDirFallback)LittleLauncherFlyout.runtimeconfig.json" DestinationFolder="$(OutputPath)" SkipUnchangedFiles="true" Condition="!Exists('$(FlyoutOutputDir)LittleLauncherFlyout.exe') And Exists('$(FlyoutOutputDirFallback)LittleLauncherFlyout.exe')" />
   </Target>
 
   <!-- Content files to copy to output ────────────────────────────── -->
