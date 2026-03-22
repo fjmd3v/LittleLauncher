@@ -51,7 +51,8 @@ applyTo: "{**/ViewModels/UserSettings*.cs,**/Models/Launcher.cs}"
 
 ### Sharing Properties (plain auto-properties, not `[ObservableProperty]`)
 - `IsShared` (bool) — whether this launcher participates in sharing
-- `IsSharedOwner` (bool) — `true` = publisher, `false` = subscriber (read-only items)
+- `IsSharedOwner` (bool) — `true` = publisher, `false` = subscriber; only meaningful when `SharedTwoWay` is `false`
+- `SharedTwoWay` (bool) — `true` = all participants push and pull (last save wins); `false` = 1-way (owner pushes, subscribers pull)
 - `SharedSyncMode` (int) — 0 = File (local/network path), 1 = SFTP
 - `SharedPath` (string) — file path (local/UNC) or SFTP remote path depending on mode
 - `SharedSftpHost`, `SharedSftpPort` (int, default 22), `SharedSftpUsername`, `SharedSftpPrivateKeyPath` — SFTP connection fields (only used when `SharedSyncMode == 1`)

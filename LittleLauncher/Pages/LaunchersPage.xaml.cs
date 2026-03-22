@@ -221,42 +221,37 @@ public sealed partial class LaunchersPage : Page
         headerLeft.Children.Add(headerIcon);
         headerLeft.Children.Add(headerTitle);
 
-        // ── Shared/Subscribed badge ─────────────────────────────────
+        // ── Shared badge ────────────────────────────────────────────
         if (launcher.IsShared)
         {
-            if (launcher.IsSharedOwner)
+            string badgeText = launcher.SharedTwoWay
+                ? "Shared"
+                : (launcher.IsSharedOwner ? "Shared (owner)" : "Subscribed");
+
+            bool isAccent = launcher.SharedTwoWay || launcher.IsSharedOwner;
+            var badge = new Border
             {
-                var badge = new Border
-                {
-                    Background = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["AccentFillColorDefaultBrush"],
-                    CornerRadius = new CornerRadius(10),
-                    Padding = new Thickness(7, 2, 7, 2),
-                    Margin = new Thickness(8, 0, 0, 0),
-                    VerticalAlignment = VerticalAlignment.Center,
-                };
-                var badgeStack = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4 };
-                badgeStack.Children.Add(new FontIcon { Glyph = "\uE753", FontSize = 10, Foreground = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.White) });
-                badgeStack.Children.Add(new TextBlock { Text = "Shared", FontSize = 11, Foreground = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.White), FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
-                badge.Child = badgeStack;
-                headerLeft.Children.Add(badge);
-            }
+                CornerRadius = new CornerRadius(10),
+                Padding = new Thickness(7, 2, 7, 2),
+                Margin = new Thickness(8, 0, 0, 0),
+                VerticalAlignment = VerticalAlignment.Center,
+            };
+            if (isAccent)
+                badge.Background = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["AccentFillColorDefaultBrush"];
             else
             {
-                var badge = new Border
-                {
-                    BorderBrush = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["CardStrokeColorDefaultBrush"],
-                    BorderThickness = new Thickness(1),
-                    CornerRadius = new CornerRadius(10),
-                    Padding = new Thickness(7, 2, 7, 2),
-                    Margin = new Thickness(8, 0, 0, 0),
-                    VerticalAlignment = VerticalAlignment.Center,
-                };
-                var badgeStack = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4 };
-                badgeStack.Children.Add(new FontIcon { Glyph = "\uE72E", FontSize = 10, Foreground = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["TextFillColorSecondaryBrush"] });
-                badgeStack.Children.Add(new TextBlock { Text = "Subscribed", FontSize = 11, Foreground = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["TextFillColorSecondaryBrush"], FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
-                badge.Child = badgeStack;
-                headerLeft.Children.Add(badge);
+                badge.BorderBrush = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["CardStrokeColorDefaultBrush"];
+                badge.BorderThickness = new Thickness(1);
             }
+
+            var badgeFg = isAccent
+                ? new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.White)
+                : (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["TextFillColorSecondaryBrush"];
+            var badgeStack = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4 };
+            badgeStack.Children.Add(new FontIcon { Glyph = "\uE72D", FontSize = 10, Foreground = badgeFg });
+            badgeStack.Children.Add(new TextBlock { Text = badgeText, FontSize = 11, Foreground = badgeFg, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
+            badge.Child = badgeStack;
+            headerLeft.Children.Add(badge);
         }
 
         // ── Header buttons (sync, settings, share, delete) ─────────
@@ -553,9 +548,19 @@ public sealed partial class LaunchersPage : Page
             if (password == null) return; // user cancelled
         }
 
-        (bool ok, string msg) = launcher.IsSharedOwner
-            ? await SftpSyncService.ShareLauncherAsync(launcher, password)
-            : await SftpSyncService.SyncSharedLauncherAsync(launcher, password);
+        bool canPush = launcher.SharedTwoWay || launcher.IsSharedOwner;
+        bool canPull = launcher.SharedTwoWay || !launcher.IsSharedOwner;
+        bool ok = true;
+        string msg = "";
+
+        if (canPush)
+        {
+            (ok, msg) = await SftpSyncService.ShareLauncherAsync(launcher, password);
+        }
+        if (ok && canPull)
+        {
+            (ok, msg) = await SftpSyncService.SyncSharedLauncherAsync(launcher, password);
+        }
 
         if (!ok)
         {
@@ -571,18 +576,18 @@ public sealed partial class LaunchersPage : Page
 
     private async Task ShowShareLauncherDialog(Launcher launcher)
     {
-        var (formPanel, modeCombo, pathBox, hostBox, portBox, userBox, keyBox) = BuildShareForm(launcher);
+        var (formPanel, modeCombo, pathBox, hostBox, portBox, userBox, keyBox, directionCombo) = BuildShareForm(launcher);
 
         var dialog = new ContentDialog
         {
             XamlRoot = this.XamlRoot,
             Title = launcher.IsShared
-                ? (launcher.IsSharedOwner ? "Sharing Settings" : "Subscription Settings")
+                ? "Sharing Settings"
                 : "Share Launcher",
             Content = new ScrollViewer { Content = formPanel, MaxHeight = 400 },
             PrimaryButtonText = launcher.IsShared ? "Update" : "Share",
             SecondaryButtonText = launcher.IsShared
-                ? (launcher.IsSharedOwner ? "Stop Sharing" : "Unsubscribe")
+                ? "Stop Sharing"
                 : null,
             CloseButtonText = "Cancel",
             DefaultButton = ContentDialogButton.Primary,
@@ -594,6 +599,7 @@ public sealed partial class LaunchersPage : Page
             // Stop sharing
             launcher.IsShared = false;
             launcher.IsSharedOwner = false;
+            launcher.SharedTwoWay = false;
             launcher.SharedSyncMode = 0;
             launcher.SharedPath = "";
             launcher.SharedSftpHost = "";
@@ -629,8 +635,11 @@ public sealed partial class LaunchersPage : Page
         launcher.SharedSftpUsername = userBox.Text.Trim();
         launcher.SharedSftpPrivateKeyPath = keyBox.Text.Trim();
 
+        bool isTwoWay = directionCombo.SelectedIndex == 0;
+        launcher.SharedTwoWay = isTwoWay;
         launcher.IsShared = true;
-        launcher.IsSharedOwner = true;
+        if (!isTwoWay)
+            launcher.IsSharedOwner = true;
         SettingsManager.SaveSettings();
 
         // Initial push
@@ -658,7 +667,7 @@ public sealed partial class LaunchersPage : Page
         };
 
         var tempLauncher = new Launcher();
-        var (formPanel, modeCombo, pathBox, hostBox, portBox, userBox, keyBox) = BuildShareForm(tempLauncher);
+        var (formPanel, modeCombo, pathBox, hostBox, portBox, userBox, keyBox, directionCombo) = BuildShareForm(tempLauncher);
 
         var fullPanel = new StackPanel { Spacing = 4 };
         fullPanel.Children.Add(new TextBlock { Text = "Name", FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
@@ -693,12 +702,14 @@ public sealed partial class LaunchersPage : Page
             return;
         }
 
+        bool isTwoWay = directionCombo.SelectedIndex == 0;
         var newLauncher = new Launcher
         {
             Id = Guid.NewGuid().ToString(),
             Name = string.IsNullOrWhiteSpace(nameBox.Text) ? "Shared Launcher" : nameBox.Text.Trim(),
             IsShared = true,
             IsSharedOwner = false,
+            SharedTwoWay = isTwoWay,
             SharedSyncMode = mode,
             SharedPath = path,
             SharedSftpHost = hostBox.Text.Trim(),
@@ -737,9 +748,16 @@ public sealed partial class LaunchersPage : Page
     // ── Shared dialog helpers ───────────────────────────────────────
 
     private static (StackPanel Panel, ComboBox ModeCombo, TextBox PathBox,
-        TextBox HostBox, TextBox PortBox, TextBox UserBox, TextBox KeyBox)
+        TextBox HostBox, TextBox PortBox, TextBox UserBox, TextBox KeyBox,
+        ComboBox DirectionCombo)
         BuildShareForm(Launcher launcher)
     {
+        // ── Direction ───────────────────────────────────────────────
+        var directionCombo = new ComboBox { MinWidth = 160 };
+        directionCombo.Items.Add("2-way (all participants can edit)");
+        directionCombo.Items.Add("1-way (owner publishes, others subscribe)");
+        directionCombo.SelectedIndex = launcher.SharedTwoWay ? 0 : 1;
+
         var modeCombo = new ComboBox { MinWidth = 160 };
         modeCombo.Items.Add("File (local or network)");
         modeCombo.Items.Add("SFTP");
@@ -783,11 +801,12 @@ public sealed partial class LaunchersPage : Page
         };
 
         var panel = new StackPanel { Spacing = 4 };
+        AddField(panel, "Direction", directionCombo);
         AddField(panel, "Mode", modeCombo);
         AddField(panel, "Path", pathBox);
         panel.Children.Add(sftpPanel);
 
-        return (panel, modeCombo, pathBox, hostBox, portBox, userBox, keyBox);
+        return (panel, modeCombo, pathBox, hostBox, portBox, userBox, keyBox, directionCombo);
     }
 
     private async Task<string?> ShowPasswordPrompt()

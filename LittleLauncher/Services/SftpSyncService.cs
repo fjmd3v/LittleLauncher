@@ -181,7 +181,9 @@ public static class SftpSyncService
     }
 
     /// <summary>
-    /// Sync all shared launchers silently: owners push, subscribers pull.
+    /// Sync all shared launchers silently.
+    /// 2-way launchers: pull then push.
+    /// 1-way launchers: owners push, subscribers pull.
     /// Skips SFTP launchers without an auto-detectable SSH key.
     /// </summary>
     public static async Task SyncAllSharedLaunchersAsync()
@@ -193,7 +195,16 @@ public static class SftpSyncService
             // File mode always works; SFTP mode requires an auto key
             if (launcher.IsSftpSync && !HasAutoKeyForShared(launcher)) continue;
 
-            if (launcher.IsSharedOwner)
+            if (launcher.SharedTwoWay)
+            {
+                // 2-way: pull first, then push
+                var (pullOk, pullMsg) = await SyncSharedLauncherAsync(launcher);
+                if (!pullOk) Logger.Warn($"Shared pull failed for '{launcher.Name}': {pullMsg}");
+
+                var (pushOk, pushMsg) = await ShareLauncherAsync(launcher);
+                if (!pushOk) Logger.Warn($"Shared push failed for '{launcher.Name}': {pushMsg}");
+            }
+            else if (launcher.IsSharedOwner)
             {
                 var (ok, msg) = await ShareLauncherAsync(launcher);
                 if (!ok) Logger.Warn($"Shared outgoing sync failed for '{launcher.Name}': {msg}");
@@ -203,6 +214,24 @@ public static class SftpSyncService
                 var (ok, msg) = await SyncSharedLauncherAsync(launcher);
                 if (!ok) Logger.Warn($"Shared incoming sync failed for '{launcher.Name}': {msg}");
             }
+        }
+    }
+
+    /// <summary>
+    /// Push shared launchers that this user can write to (2-way participants and 1-way owners).
+    /// Used by auto-sync after debounced item changes to propagate edits without pulling first.
+    /// Skips SFTP launchers without an auto-detectable SSH key.
+    /// </summary>
+    public static async Task PushAllSharedLaunchersAsync()
+    {
+        foreach (var launcher in SettingsManager.Current.Launchers.ToList())
+        {
+            if (!launcher.IsShared) continue;
+            if (!launcher.SharedTwoWay && !launcher.IsSharedOwner) continue;
+            if (launcher.IsSftpSync && !HasAutoKeyForShared(launcher)) continue;
+
+            var (ok, msg) = await ShareLauncherAsync(launcher);
+            if (!ok) Logger.Warn($"Shared push failed for '{launcher.Name}': {msg}");
         }
     }
 
@@ -410,9 +439,11 @@ public static class SftpSyncService
     /// <summary>
     /// Apply downloaded shared items to a launcher on the UI thread,
     /// fetch missing icons, and save settings.
+    /// Suppresses the auto-sync upload trigger to prevent feedback loops.
     /// </summary>
     private static async Task ApplySharedItemsAsync(Launcher launcher, List<LauncherItem> items)
     {
+        AutoSyncService.SuppressNextChange = true;
         var tcs = new TaskCompletionSource();
         App.MainDispatcherQueue.TryEnqueue(() =>
         {

@@ -53,9 +53,15 @@ public partial class Launcher : ObservableObject
 
     /// <summary>
     /// true = this user publishes (owner); false = subscribed (consumer, items read-only).
-    /// Only meaningful when <see cref="IsShared"/> is true.
+    /// Only meaningful when <see cref="IsShared"/> is true and <see cref="SharedTwoWay"/> is false.
     /// </summary>
     public bool IsSharedOwner { get; set; }
+
+    /// <summary>
+    /// When true, all participants both push and pull (last save wins).
+    /// When false, sharing is 1-way: owners push, subscribers pull.
+    /// </summary>
+    public bool SharedTwoWay { get; set; }
 
     /// <summary>
     /// 0 = File (local or network path), 1 = SFTP.

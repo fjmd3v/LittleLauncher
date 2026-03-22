@@ -16,6 +16,13 @@ public static class AutoSyncService
     private static bool _running;
 
     /// <summary>
+    /// When true, the next call to <see cref="NotifyItemsChanged"/> is ignored.
+    /// Used to prevent feedback loops when downloading shared items triggers
+    /// a re-upload.
+    /// </summary>
+    internal static bool SuppressNextChange { get; set; }
+
+    /// <summary>
     /// Start periodic sync timer. Call once at app startup (after startup sync completes).
     /// </summary>
     public static void Start()
@@ -64,6 +71,12 @@ public static class AutoSyncService
     /// </summary>
     public static void NotifyItemsChanged()
     {
+        if (SuppressNextChange)
+        {
+            SuppressNextChange = false;
+            return;
+        }
+
         if (!SettingsManager.Current.SftpAutoSync
             || string.IsNullOrWhiteSpace(SettingsManager.Current.SftpHost))
             return;
@@ -71,7 +84,7 @@ public static class AutoSyncService
         // Reset the debounce timer — upload 3 seconds after last change
         _debounceTimer?.Dispose();
         _debounceTimer = new System.Threading.Timer(
-            _ => _ = UploadSilentAsync("debounced item change"),
+            _ => _ = UploadAndPushSharedAsync("debounced item change"),
             null,
             TimeSpan.FromSeconds(3),
             Timeout.InfiniteTimeSpan);
@@ -106,7 +119,7 @@ public static class AutoSyncService
         await SyncSharedLaunchersSilentAsync("startup");
     }
 
-    private static async Task UploadSilentAsync(string trigger)
+    private static async Task UploadAndPushSharedAsync(string trigger)
     {
         if (!SettingsManager.Current.SftpAutoSync
             || string.IsNullOrWhiteSpace(SettingsManager.Current.SftpHost))
@@ -123,6 +136,22 @@ public static class AutoSyncService
         catch (Exception ex)
         {
             Logger.Warn(ex, $"Auto-sync ({trigger}) failed");
+        }
+
+        // Also push any shared launchers that this user participates in
+        await PushSharedLaunchersSilentAsync(trigger);
+    }
+
+    private static async Task PushSharedLaunchersSilentAsync(string trigger)
+    {
+        try
+        {
+            await SftpSyncService.PushAllSharedLaunchersAsync();
+            Logger.Info($"Shared launcher push ({trigger}): complete");
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn(ex, $"Shared launcher push ({trigger}) failed");
         }
     }
 
