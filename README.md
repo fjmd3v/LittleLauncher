@@ -17,6 +17,10 @@
   <img src="LittleLauncher/Resources/AppIcons/Purple.png" width="48">
 </p>
 
+<p align="center">
+  <img src="docs/screenshot.png" alt="Little Launcher flyout" width="720">
+</p>
+
 ## Overview
 
 Little Launcher lives in the Windows system tray. Clicking the tray icon opens a flyout with app and website shortcuts. It also provides SSH/SFTP-based settings synchronisation so you can keep your launcher configuration in sync across machines.
