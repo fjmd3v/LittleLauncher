@@ -370,3 +370,6 @@ FodyWeavers.xsd
 .idea/
 
 Website/tailwindcss.exe
+
+# Build output captures
+build_out.txt
