@@ -41,6 +41,20 @@ public sealed partial class LaunchersPage : Page
         }
     }
 
+    private static int CountLauncherItems(IEnumerable<LauncherItem> items)
+    {
+        int count = 0;
+        foreach (var item in items)
+        {
+            if (item.IsColumnBreak) continue;
+            if (item.IsGroup)
+                count += CountLauncherItems(item.Children);
+            else
+                count++;
+        }
+        return count;
+    }
+
     private Border BuildLauncherCard(Launcher launcher)
     {
         // ── Name row ────────────────────────────────────────────────
@@ -156,7 +170,7 @@ public sealed partial class LaunchersPage : Page
         taskbarRow.Children.Add(pinBtn);
 
         // ── Items row (clickable drill-in with chevron) ─────────────
-        int itemCount = launcher.Items.Count;
+        int itemCount = CountLauncherItems(launcher.Items);
 
         var itemsLabel = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
         itemsLabel.Children.Add(new TextBlock { Text = "Items", FontSize = 14 });
