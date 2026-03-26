@@ -93,7 +93,11 @@ Supports both private-key (`PrivateKeyFile`) and password-based authentication.
 
 The flyout popup dismisses when focus is lost via the WinUI `Activated` event (`Deactivated` state). It uses `WS_EX_TOOLWINDOW` to stay out of Alt-Tab and `OverlappedPresenter.CreateForContextMenu()` for borderless always-on-top presentation.
 
-**Multi-column layout**: The flyout renders items into a horizontal `ColumnsPanel` (a `StackPanel`). Each `LauncherItem` with `IsColumnBreak = true` starts a new column; `RebuildColumnsPanel()` rebuilds all column `ListView` instances from scratch whenever the items change. Each column is a dynamically created `ListView` (200 px wide) sharing the same `ItemTemplateSelector` and `ItemContainerStyleSelector` resources. The window width scales with the column count: `200 × columnCount` logical pixels.
+**Multi-column & multi-view layout**: The flyout renders items into a horizontal `ColumnsPanel` (a `StackPanel`). Each `LauncherItem` with `IsColumnBreak = true` starts a new column. The display mode is controlled by `Launcher.ViewMode`:
+- **List view** (ViewMode = 0, default): Each column is a `ListView` (175 px wide) with icon + text side-by-side, using `ItemTemplateSelector` and `ItemContainerStyleSelector`.
+- **Icon view** (ViewMode = 1): Each column is a dynamically created `ScrollViewer` containing icon tiles in a 3-column wrapping grid (260 px wide), with 32×32 icons and text below.
+
+`RebuildColumnsPanel()` rebuilds all columns (icon grid or ListView) from scratch whenever items change. Window width scales: 175 px (list) or 260 px (icon) per column.
 
 **Right-click context menu**: Right-clicking empty space in the flyout shows a `ContextFlyout` with a "Settings" option that dismisses the flyout and opens `SettingsWindow`.
 
