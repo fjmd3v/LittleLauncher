@@ -218,11 +218,36 @@ public sealed partial class LaunchersPage : Page
         };
         deleteBtn.Click += DeleteLauncher_Click;
 
+        // ── View mode combo ──────────────────────────────────────────
+        var viewModeCombo = new ComboBox { MinWidth = 160 };
+        viewModeCombo.Items.Add("Icons");
+        viewModeCombo.Items.Add("List");
+        viewModeCombo.SelectedIndex = Math.Clamp(launcher.ViewMode, 0, 1);
+        viewModeCombo.SelectionChanged += (s, e) =>
+        {
+            launcher.ViewMode = viewModeCombo.SelectedIndex;
+            SettingsManager.SaveSettings();
+            FlyoutWindow.InvalidateItems(launcher.Id);
+        };
+
+        var viewModeRow = new Grid();
+        viewModeRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        viewModeRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+        var viewModeLabel = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
+        viewModeLabel.Children.Add(new TextBlock { Text = "View Mode", FontSize = 14 });
+        viewModeLabel.Children.Add(new TextBlock { Text = "How items appear in the flyout popup", FontSize = 12, Opacity = 0.5 });
+        Grid.SetColumn(viewModeLabel, 0);
+        Grid.SetColumn(viewModeCombo, 1);
+        viewModeRow.Children.Add(viewModeLabel);
+        viewModeRow.Children.Add(viewModeCombo);
+
         // ── Card container ──────────────────────────────────────────
         var content = new StackPanel { Spacing = 8 };
         content.Children.Add(nameRow);
         content.Children.Add(iconRow);
         content.Children.Add(customIconRow);
+        content.Children.Add(viewModeRow);
         content.Children.Add(hideRow);
         content.Children.Add(taskbarRow);
         content.Children.Add(itemsRow);

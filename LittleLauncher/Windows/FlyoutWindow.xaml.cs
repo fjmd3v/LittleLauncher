@@ -16,6 +16,7 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Xaml.Media.Imaging;
 using Microsoft.UI.Windowing;
 using Microsoft.UI;
 using WinRT.Interop;
@@ -27,6 +28,11 @@ namespace LittleLauncher.Windows;
 public partial class FlyoutWindow : Window
 {
     private const int ColumnWidth = 175;
+    private const int IconColumnWidth = 260;
+    private const int IconCellWidth = 80;
+    private const int IconCellHeight = 84;
+    private const int IconSize = 32;
+    private const int IconsPerRow = 3;
 
     private static readonly NLog.Logger Logger = NLog.LogManager.GetCurrentClassLogger();
     private static readonly object BoundsFileLock = new();
@@ -138,7 +144,8 @@ public partial class FlyoutWindow : Window
         double dpiScale = GetDpiForWindow(instance._hwnd) / 96.0;
         if (dpiScale <= 0) dpiScale = 1.0;
         int columnCount = Math.Max(1, instance.ColumnsPanel.Children.Count);
-        int flyoutWidthPx = (int)(ColumnWidth * columnCount * dpiScale);
+        int colWidth = instance._launcher.ViewMode == 1 ? ColumnWidth : IconColumnWidth;
+        int flyoutWidthPx = (int)(colWidth * columnCount * dpiScale);
         int flyoutHeightPx = (int)Math.Ceiling(instance.MeasureContentHeight() * dpiScale);
 
         // Position off-screen first, then show
@@ -211,6 +218,7 @@ public partial class FlyoutWindow : Window
         var items = launcher.Items;
         if (items == null || items.Count == 0) return 0;
         var hash = new HashCode();
+        hash.Add(launcher.ViewMode);
         foreach (var item in items)
         {
             HashItem(ref hash, item);
@@ -289,14 +297,166 @@ public partial class FlyoutWindow : Window
         return lv;
     }
 
+    // ── Icon mode rendering ─────────────────────────────────────────
+
+    private ScrollViewer CreateIconModeColumn(ObservableCollection<LauncherItem> items)
+    {
+        var column = new StackPanel { Width = IconColumnWidth, Padding = new Thickness(8, 6, 8, 6) };
+        var currentRow = new StackPanel { Orientation = Orientation.Horizontal };
+        int itemsInRow = 0;
+
+        void FlushRow()
+        {
+            if (currentRow.Children.Count > 0)
+            {
+                column.Children.Add(currentRow);
+                currentRow = new StackPanel { Orientation = Orientation.Horizontal };
+                itemsInRow = 0;
+            }
+        }
+
+        void AddTile(LauncherItem child)
+        {
+            currentRow.Children.Add(CreateIconTile(child));
+            itemsInRow++;
+            if (itemsInRow >= IconsPerRow)
+                FlushRow();
+        }
+
+        foreach (var item in items)
+        {
+            if (item.IsGroup)
+            {
+                FlushRow();
+                column.Children.Add(new TextBlock
+                {
+                    Text = item.Name,
+                    FontSize = 12,
+                    FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                    Opacity = 0.7,
+                    TextAlignment = TextAlignment.Center,
+                    HorizontalAlignment = HorizontalAlignment.Stretch,
+                    Margin = new Thickness(0, 8, 0, 4),
+                });
+            }
+            else
+            {
+                AddTile(item);
+            }
+        }
+
+        if (currentRow.Children.Count > 0)
+            column.Children.Add(currentRow);
+
+        return new ScrollViewer
+        {
+            Content = column,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+        };
+    }
+
+    private Button CreateIconTile(LauncherItem item)
+    {
+        UIElement iconElement;
+        if (!string.IsNullOrEmpty(item.IconPath) && File.Exists(item.IconPath))
+        {
+            var bmp = new BitmapImage { DecodePixelWidth = IconSize + 4 };
+            bmp.UriSource = new Uri(item.IconPath, UriKind.Absolute);
+            iconElement = new Image
+            {
+                Source = bmp,
+                Width = IconSize,
+                Height = IconSize,
+                HorizontalAlignment = HorizontalAlignment.Center,
+            };
+        }
+        else
+        {
+            iconElement = new FontIcon
+            {
+                Glyph = item.IconGlyph,
+                FontSize = IconSize - 4,
+                HorizontalAlignment = HorizontalAlignment.Center,
+            };
+        }
+
+        var nameText = new TextBlock
+        {
+            Text = item.Name,
+            FontSize = 11,
+            TextAlignment = TextAlignment.Center,
+            TextWrapping = TextWrapping.Wrap,
+            TextTrimming = TextTrimming.CharacterEllipsis,
+            MaxLines = 2,
+            MaxWidth = IconCellWidth - 8,
+            HorizontalAlignment = HorizontalAlignment.Center,
+        };
+
+        var content = new Grid();
+        content.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        content.RowDefinitions.Add(new RowDefinition { Height = new GridLength(32) });
+
+        iconElement.SetValue(Grid.RowProperty, 0);
+        iconElement.SetValue(FrameworkElement.VerticalAlignmentProperty, VerticalAlignment.Center);
+        iconElement.SetValue(FrameworkElement.HorizontalAlignmentProperty, HorizontalAlignment.Center);
+        content.Children.Add(iconElement);
+
+        nameText.VerticalAlignment = VerticalAlignment.Top;
+        Grid.SetRow(nameText, 1);
+        content.Children.Add(nameText);
+
+        var tile = new Button
+        {
+            Width = IconCellWidth,
+            Height = IconCellHeight,
+            Padding = new Thickness(4),
+            Background = (Brush)Application.Current.Resources["SubtleFillColorTransparentBrush"],
+            BorderThickness = new Thickness(0),
+            CornerRadius = new CornerRadius(6),
+            HorizontalContentAlignment = HorizontalAlignment.Stretch,
+            VerticalContentAlignment = VerticalAlignment.Stretch,
+            Content = content,
+            Tag = item,
+        };
+        tile.Click += IconTile_Click;
+        tile.RightTapped += IconTile_RightTapped;
+        return tile;
+    }
+
+    private void IconTile_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button btn && btn.Tag is LauncherItem item && !item.IsGroup)
+            LaunchItem(item);
+    }
+
+    private void IconTile_RightTapped(object sender, RightTappedRoutedEventArgs e)
+    {
+        if (sender is Button btn && btn.Tag is LauncherItem item && !item.IsGroup)
+        {
+            var flyout = new MenuFlyout();
+            var editItem = new MenuFlyoutItem { Text = "Edit" };
+            editItem.Click += (_, _) => EditItem(item);
+            flyout.Items.Add(editItem);
+            flyout.ShowAt(btn);
+        }
+    }
+
     private void RebuildColumnsPanel()
     {
         ColumnsPanel.Children.Clear();
         foreach (var col in BuildColumnLists())
         {
-            var lv = CreateColumnListView();
-            lv.ItemsSource = col;
-            ColumnsPanel.Children.Add(lv);
+            if (_launcher.ViewMode != 1)
+            {
+                ColumnsPanel.Children.Add(CreateIconModeColumn(col));
+            }
+            else
+            {
+                var lv = CreateColumnListView();
+                lv.ItemsSource = col;
+                ColumnsPanel.Children.Add(lv);
+            }
         }
     }
 
@@ -355,7 +515,8 @@ public partial class FlyoutWindow : Window
         var workArea = monitorInfo.rcWork;
 
         int columnCount = Math.Max(1, ColumnsPanel.Children.Count);
-        int flyoutWidth = (int)(ColumnWidth * columnCount * scale);
+        int colWidth = _launcher.ViewMode != 1 ? IconColumnWidth : ColumnWidth;
+        int flyoutWidth = (int)(colWidth * columnCount * scale);
         int flyoutHeight = (int)Math.Ceiling(MeasureContentHeight() * scale);
         int gap = Math.Max(4, (int)Math.Round(8 * scale));
 
@@ -400,9 +561,12 @@ public partial class FlyoutWindow : Window
     private void ItemsListControl_ItemClick(object sender, ItemClickEventArgs e)
     {
         if (e.ClickedItem is not LauncherItem item) return;
-
         if (item.IsGroup) return;
+        LaunchItem(item);
+    }
 
+    private void LaunchItem(LauncherItem item)
+    {
         HideFlyout();
         _lastDismissed = DateTime.UtcNow;
 
@@ -415,7 +579,6 @@ public partial class FlyoutWindow : Window
             }
             else if (item.IsPwa)
             {
-                // PWA items store a shell:AppsFolder AUMID in Path
                 Process.Start(new ProcessStartInfo("explorer.exe")
                 {
                     Arguments = $"shell:AppsFolder\\{item.Path}",
@@ -424,8 +587,6 @@ public partial class FlyoutWindow : Window
             }
             else if (item.Path.StartsWith("shell:", StringComparison.OrdinalIgnoreCase))
             {
-                // Store / packaged apps: ShellExecuteEx understands shell:AppsFolder\{AUMID}
-                // and forwards lpParameters (Arguments) to the activated package.
                 Process.Start(new ProcessStartInfo(item.Path)
                 {
                     UseShellExecute = true,
@@ -439,7 +600,6 @@ public partial class FlyoutWindow : Window
                 ProcessStartInfo psi;
                 if (path.EndsWith(".lnk", StringComparison.OrdinalIgnoreCase))
                 {
-                    // Shell resolves .lnk; user-supplied Arguments are intentionally ignored
                     psi = new ProcessStartInfo(path) { UseShellExecute = true };
                 }
                 else if (path.EndsWith(".bat", StringComparison.OrdinalIgnoreCase)
@@ -453,8 +613,6 @@ public partial class FlyoutWindow : Window
                 }
                 else
                 {
-                    // Use CreateProcess directly so arguments are always forwarded,
-                    // including for MSIX App Execution Aliases (e.g. wt.exe).
                     psi = new ProcessStartInfo(path)
                     {
                         Arguments = args,
@@ -785,6 +943,21 @@ public partial class FlyoutWindow : Window
         }
     }
 
+    private void ContextEditLauncherItem_Click(object sender, RoutedEventArgs e)
+    {
+        HideFlyout();
+        _lastDismissed = DateTime.UtcNow;
+        if (_owner != null)
+        {
+            SettingsWindow.ShowInstance(_owner);
+            var sw = SettingsWindow.GetCurrent();
+            if (sw != null)
+            {
+                sw.DispatcherQueue.TryEnqueue(() => sw.NavigateToLauncherItems(_launcher));
+            }
+        }
+    }
+
     private void ContextSettingsItem_Click(object sender, RoutedEventArgs e)
     {
         HideFlyout();
@@ -797,6 +970,9 @@ public partial class FlyoutWindow : Window
 
     private double MeasureContentHeight()
     {
+        if (_launcher.ViewMode != 1)
+            return MeasureIconModeHeight();
+
         // Calculate height arithmetically instead of calling UpdateLayout()/Measure()
         // on a potentially hidden window. Forcing a XAML layout pass on a window hidden
         // via ShowWindow(SW_HIDE) while another WinUI 3 window is active causes a fatal
@@ -804,10 +980,10 @@ public partial class FlyoutWindow : Window
         //
         // Each ListViewItem container: MinHeight=0, Padding="8,6" → 12px vertical padding.
         // Regular item content: Icon 20px tall → total ~32px
-        // Group header content: FontSize=11 (~15px) + Margin top 6 → total ~33px
+        // Group header content: NavigationViewItemHeader ~40px
         // Heading content:      FontSize=11 (~15px) + Margin top 4 → total ~31px
         const double itemHeight = 32;
-        const double groupHeight = 33;
+        const double groupHeight = 40;
         const double listPadding = 12;     // ListView Padding="8,6,8,6" → 6+6
 
         var items = _launcher.Items;
@@ -845,6 +1021,63 @@ public partial class FlyoutWindow : Window
         // Add a small buffer to cover accumulated sub-pixel font-height rounding.
         // Clamp to the available work-area height so the flyout never exceeds the screen.
         double maxContentHeight = GetWorkAreaHeightDips() - 16; // 16 = gap from taskbar edges
+        _lastMeasuredHeight = Math.Clamp(maxColumnHeight + 2, 80, maxContentHeight);
+        return _lastMeasuredHeight;
+    }
+
+    private double MeasureIconModeHeight()
+    {
+        const double groupHeight = 30; // TextBlock(12) + Margin(8+4) ≈ 28, rounded up
+        const double listPadding = 12;
+
+        var items = _launcher.Items;
+        if (items == null) return _lastMeasuredHeight;
+
+        double maxColumnHeight = 0;
+        double currentColumnHeight = listPadding;
+        int pendingIcons = 0;
+
+        foreach (var item in items)
+        {
+            if (item.IsColumnBreak)
+            {
+                if (pendingIcons > 0)
+                {
+                    int rows = (pendingIcons + IconsPerRow - 1) / IconsPerRow;
+                    currentColumnHeight += rows * IconCellHeight;
+                    pendingIcons = 0;
+                }
+                maxColumnHeight = Math.Max(maxColumnHeight, currentColumnHeight);
+                currentColumnHeight = listPadding;
+                continue;
+            }
+
+            if (item.IsGroup)
+            {
+                if (pendingIcons > 0)
+                {
+                    int rows = (pendingIcons + IconsPerRow - 1) / IconsPerRow;
+                    currentColumnHeight += rows * IconCellHeight;
+                    pendingIcons = 0;
+                }
+                currentColumnHeight += groupHeight;
+                foreach (var _ in item.Children)
+                    pendingIcons++;
+            }
+            else
+            {
+                pendingIcons++;
+            }
+        }
+
+        if (pendingIcons > 0)
+        {
+            int rows = (pendingIcons + IconsPerRow - 1) / IconsPerRow;
+            currentColumnHeight += rows * IconCellHeight;
+        }
+
+        maxColumnHeight = Math.Max(maxColumnHeight, currentColumnHeight);
+        double maxContentHeight = GetWorkAreaHeightDips() - 16;
         _lastMeasuredHeight = Math.Clamp(maxColumnHeight + 2, 80, maxContentHeight);
         return _lastMeasuredHeight;
     }

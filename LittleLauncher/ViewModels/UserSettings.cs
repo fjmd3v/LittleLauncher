@@ -138,6 +138,23 @@ public partial class UserSettings : ObservableObject
     [JsonIgnore]
     private bool _initializing = true;
 
+    // ── Settings Window State ────────────────────────────────────────
+
+    /// <summary>Saved settings window X position (physical pixels).</summary>
+    public int SettingsWindowX { get; set; }
+
+    /// <summary>Saved settings window Y position (physical pixels).</summary>
+    public int SettingsWindowY { get; set; }
+
+    /// <summary>Saved settings window width (physical pixels).</summary>
+    public int SettingsWindowWidth { get; set; }
+
+    /// <summary>Saved settings window height (physical pixels).</summary>
+    public int SettingsWindowHeight { get; set; }
+
+    /// <summary>Whether the settings window was maximized.</summary>
+    public bool SettingsWindowMaximized { get; set; }
+
     // ── Constructor (defaults) ──────────────────────────────────────
 
     public UserSettings()

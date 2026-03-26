@@ -69,19 +69,32 @@ public sealed partial class SettingsWindow : Window
         LoadTitleBarIcon(iconPath);
         uint dpi = GetDpiForWindow(hwnd);
         double scale = dpi / 96.0;
-        int width = (int)(900 * scale);
-        int height = (int)(700 * scale);
-        appWindow.Resize(new global::Windows.Graphics.SizeInt32(width, height));
+        var settings = SettingsManager.Current;
 
-        // Center on the monitor nearest the cursor
-        GetCursorPos(out var cursorPt);
-        var monitor = MonitorFromPoint(cursorPt, MONITOR_DEFAULTTONEAREST);
-        var mi = new MONITORINFOEX { cbSize = System.Runtime.InteropServices.Marshal.SizeOf<MONITORINFOEX>() };
-        if (GetMonitorInfo(monitor, ref mi))
+        if (settings.SettingsWindowWidth > 0 && settings.SettingsWindowHeight > 0)
         {
-            int cx = mi.rcWork.Left + (mi.rcWork.Right - mi.rcWork.Left - width) / 2;
-            int cy = mi.rcWork.Top + (mi.rcWork.Bottom - mi.rcWork.Top - height) / 2;
-            appWindow.Move(new global::Windows.Graphics.PointInt32(cx, cy));
+            // Restore saved size and position
+            appWindow.Resize(new global::Windows.Graphics.SizeInt32(
+                settings.SettingsWindowWidth, settings.SettingsWindowHeight));
+            appWindow.Move(new global::Windows.Graphics.PointInt32(
+                settings.SettingsWindowX, settings.SettingsWindowY));
+        }
+        else
+        {
+            // Default: 900x700 centered on cursor monitor
+            int width = (int)(900 * scale);
+            int height = (int)(700 * scale);
+            appWindow.Resize(new global::Windows.Graphics.SizeInt32(width, height));
+
+            GetCursorPos(out var cursorPt);
+            var monitor = MonitorFromPoint(cursorPt, MONITOR_DEFAULTTONEAREST);
+            var mi = new MONITORINFOEX { cbSize = System.Runtime.InteropServices.Marshal.SizeOf<MONITORINFOEX>() };
+            if (GetMonitorInfo(monitor, ref mi))
+            {
+                int cx = mi.rcWork.Left + (mi.rcWork.Right - mi.rcWork.Left - width) / 2;
+                int cy = mi.rcWork.Top + (mi.rcWork.Bottom - mi.rcWork.Top - height) / 2;
+                appWindow.Move(new global::Windows.Graphics.PointInt32(cx, cy));
+            }
         }
 
         // Navigate to home
@@ -90,6 +103,13 @@ public sealed partial class SettingsWindow : Window
 
         // Apply saved theme to this window
         Classes.ThemeManager.ApplySavedTheme(this);
+
+        // Restore maximized state
+        if (settings.SettingsWindowMaximized)
+        {
+            if (appWindow.Presenter is OverlappedPresenter presenter)
+                presenter.Maximize();
+        }
 
         // Re-apply icon after WinUI finishes initializing (it can override WM_SETICON)
         Activated += (s, e) =>
@@ -285,9 +305,7 @@ public sealed partial class SettingsWindow : Window
     /// </summary>
     public void NavigateToLauncherItems(Launcher launcher)
     {
-        LauncherItemsPage.TargetLauncher = launcher;
-        ContentFrame.Navigate(typeof(LauncherItemsPage));
-        // Keep "Launchers" selected in the nav pane
+        // Set "Launchers" selected in the nav pane first (triggers SelectionChanged → LaunchersPage)
         foreach (var item in RootNavigation.MenuItems.OfType<NavigationViewItem>())
         {
             if (item.Tag as string == "LaunchersPage")
@@ -296,10 +314,30 @@ public sealed partial class SettingsWindow : Window
                 break;
             }
         }
+        // Then navigate to the items page (overrides the LaunchersPage navigation above)
+        LauncherItemsPage.TargetLauncher = launcher;
+        ContentFrame.Navigate(typeof(LauncherItemsPage));
     }
 
     private void SettingsWindow_Closed(object sender, WindowEventArgs e)
     {
+        // Save window state (size, position, maximized)
+        var hwnd = WindowNative.GetWindowHandle(this);
+        var wndId = Microsoft.UI.Win32Interop.GetWindowIdFromWindow(hwnd);
+        var appWindow = AppWindow.GetFromWindowId(wndId);
+        var settings = SettingsManager.Current;
+
+        bool isMaximized = appWindow.Presenter is OverlappedPresenter p && p.State == OverlappedPresenterState.Maximized;
+        settings.SettingsWindowMaximized = isMaximized;
+
+        if (!isMaximized)
+        {
+            settings.SettingsWindowX = appWindow.Position.X;
+            settings.SettingsWindowY = appWindow.Position.Y;
+            settings.SettingsWindowWidth = appWindow.Size.Width;
+            settings.SettingsWindowHeight = appWindow.Size.Height;
+        }
+
         SettingsManager.SaveSettings();
         // Refresh tray icons in case launchers were added, removed, or renamed
         MainWindow.Current?.RefreshTrayIcons();

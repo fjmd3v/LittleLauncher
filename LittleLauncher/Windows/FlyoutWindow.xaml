@@ -24,9 +24,9 @@
                       HorizontalAlignment="Stretch">
                     <TextBlock
                         Text="{Binding Name}"
-                        FontSize="11"
-                        FontWeight="Bold"
-                        Opacity="0.6"
+                        FontSize="12"
+                        FontWeight="SemiBold"
+                        Opacity="0.7"
                         Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                         VerticalAlignment="Center"
                         TextWrapping="NoWrap"
@@ -97,64 +97,23 @@
                 </Setter>
             </Style>
 
-            <!-- Container style for group headers (clickable with hover effect) -->
+            <!-- Container style for group headers (non-interactive) -->
             <Style x:Key="GroupItemContainerStyle" TargetType="ListViewItem">
                 <Setter Property="IsTabStop" Value="False" />
+                <Setter Property="IsHitTestVisible" Value="False" />
                 <Setter Property="MinHeight" Value="0" />
-                <Setter Property="Padding" Value="8,6" />
+                <Setter Property="Padding" Value="8,8,8,2" />
                 <Setter Property="HorizontalContentAlignment" Value="Stretch" />
                 <Setter Property="Template">
                     <Setter.Value>
                         <ControlTemplate TargetType="ListViewItem">
-                            <Grid>
-                                <VisualStateManager.VisualStateGroups>
-                                    <VisualStateGroup x:Name="CommonStates">
-                                        <VisualState x:Name="Normal" />
-                                        <VisualState x:Name="PointerOver">
-                                            <Storyboard>
-                                                <ObjectAnimationUsingKeyFrames Storyboard.TargetName="BackgroundBorder" Storyboard.TargetProperty="Background">
-                                                    <DiscreteObjectKeyFrame KeyTime="0" Value="{ThemeResource SubtleFillColorSecondaryBrush}" />
-                                                </ObjectAnimationUsingKeyFrames>
-                                            </Storyboard>
-                                        </VisualState>
-                                        <VisualState x:Name="Pressed">
-                                            <Storyboard>
-                                                <ObjectAnimationUsingKeyFrames Storyboard.TargetName="BackgroundBorder" Storyboard.TargetProperty="Background">
-                                                    <DiscreteObjectKeyFrame KeyTime="0" Value="{ThemeResource SubtleFillColorTertiaryBrush}" />
-                                                </ObjectAnimationUsingKeyFrames>
-                                            </Storyboard>
-                                        </VisualState>
-                                        <VisualState x:Name="Disabled" />
-                                        <VisualState x:Name="Selected" />
-                                        <VisualState x:Name="PointerOverSelected">
-                                            <Storyboard>
-                                                <ObjectAnimationUsingKeyFrames Storyboard.TargetName="BackgroundBorder" Storyboard.TargetProperty="Background">
-                                                    <DiscreteObjectKeyFrame KeyTime="0" Value="{ThemeResource SubtleFillColorSecondaryBrush}" />
-                                                </ObjectAnimationUsingKeyFrames>
-                                            </Storyboard>
-                                        </VisualState>
-                                        <VisualState x:Name="PressedSelected">
-                                            <Storyboard>
-                                                <ObjectAnimationUsingKeyFrames Storyboard.TargetName="BackgroundBorder" Storyboard.TargetProperty="Background">
-                                                    <DiscreteObjectKeyFrame KeyTime="0" Value="{ThemeResource SubtleFillColorTertiaryBrush}" />
-                                                </ObjectAnimationUsingKeyFrames>
-                                            </Storyboard>
-                                        </VisualState>
-                                    </VisualStateGroup>
-                                </VisualStateManager.VisualStateGroups>
-                                <Border
-                                    x:Name="BackgroundBorder"
-                                    CornerRadius="6"
-                                    Background="Transparent"
-                                    Padding="{TemplateBinding Padding}">
-                                    <ContentPresenter
-                                        Content="{TemplateBinding Content}"
-                                        ContentTemplate="{TemplateBinding ContentTemplate}"
-                                        ContentTransitions="{TemplateBinding ContentTransitions}"
-                                        HorizontalContentAlignment="{TemplateBinding HorizontalContentAlignment}"
-                                        VerticalContentAlignment="{TemplateBinding VerticalContentAlignment}" />
-                                </Border>
-                            </Grid>
+                            <Border Padding="{TemplateBinding Padding}">
+                                <ContentPresenter
+                                    Content="{TemplateBinding Content}"
+                                    ContentTemplate="{TemplateBinding ContentTemplate}"
+                                    HorizontalContentAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                    VerticalContentAlignment="{TemplateBinding VerticalContentAlignment}" />
+                            </Border>
                         </ControlTemplate>
                     </Setter.Value>
                 </Setter>
@@ -202,6 +161,11 @@
 
         <Grid.ContextFlyout>
             <MenuFlyout>
+                <MenuFlyoutItem x:Name="ContextEditLauncherItem" Text="Edit Launcher" Click="ContextEditLauncherItem_Click">
+                    <MenuFlyoutItem.Icon>
+                        <FontIcon Glyph="&#xE70F;" />
+                    </MenuFlyoutItem.Icon>
+                </MenuFlyoutItem>
                 <MenuFlyoutItem x:Name="ContextSettingsItem" Text="Settings" Click="ContextSettingsItem_Click">
                     <MenuFlyoutItem.Icon>
                         <FontIcon Glyph="&#xE713;" />

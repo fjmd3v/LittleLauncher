@@ -81,7 +81,7 @@
                         <ListView ItemsSource="{Binding Children}"
                                   Tag="{Binding}"
                                   CanDragItems="True" AllowDrop="True"
-                                  SelectionMode="None"
+                                  SelectionMode="None" MinHeight="36"
                                   ItemTemplateSelector="{StaticResource ItemTemplateSelector}"
                                   DragItemsStarting="GroupChildList_DragItemsStarting"
                                   DragOver="GroupChildList_DragOver"
@@ -112,6 +112,163 @@
         <pages:LauncherItemTemplateSelector x:Key="ItemTemplateSelector"
             LauncherItemTemplate="{StaticResource LauncherItemTemplate}"
             GroupItemTemplate="{StaticResource GroupItemTemplate}"/>
+
+        <!-- Icon-mode template for regular items (larger icon + name below in a tile) -->
+        <DataTemplate x:Key="IconModeItemTemplate">
+            <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                    BorderThickness="1" CornerRadius="6" Padding="4" Margin="2"
+                    Width="80" Height="86"
+                    Loaded="ItemCard_Loaded"
+                    PointerEntered="ItemCard_PointerEntered" PointerExited="ItemCard_PointerExited">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="32"/>
+                    </Grid.RowDefinitions>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <!-- Drag grip (column 0, hidden by default) -->
+                    <FontIcon Grid.Row="0" Grid.Column="0" Glyph="&#xE700;" FontSize="10" Opacity="0.3"
+                              VerticalAlignment="Top" HorizontalAlignment="Left" Margin="2,2,0,0"
+                              ToolTipService.ToolTip="Drag to reorder"/>
+                    <!-- Icon -->
+                    <Grid Grid.Row="0" Grid.Column="0" Grid.ColumnSpan="3"
+                          HorizontalAlignment="Center" VerticalAlignment="Center">
+                        <Image Source="{Binding IconPath, Converter={StaticResource IconPathToImage}}"
+                               Visibility="{Binding IconPath, Converter={StaticResource IconPathToVisibility}}"
+                               Width="32" Height="32" />
+                        <FontIcon Glyph="{Binding IconGlyph}"
+                                  Visibility="{Binding IconPath, Converter={StaticResource IconPathToVisibility}, ConverterParameter=invert}"
+                                  FontSize="28" />
+                    </Grid>
+                    <!-- Name -->
+                    <TextBlock Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="3"
+                               Text="{Binding Name}" FontSize="11"
+                               TextAlignment="Center" TextWrapping="Wrap" TextTrimming="CharacterEllipsis"
+                               MaxLines="2" VerticalAlignment="Top"
+                               HorizontalAlignment="Center" MaxWidth="72" Margin="0,2,0,0"/>
+                    <!-- Action button (column 2, hidden by default) -->
+                    <StackPanel Grid.Row="0" Grid.Column="2" Orientation="Horizontal"
+                                VerticalAlignment="Top" HorizontalAlignment="Right" Margin="0,0,0,0"
+                                PointerEntered="ItemButtons_PointerEntered" PointerExited="ItemButtons_PointerExited">
+                        <Button Click="ItemMenu_Click" Tag="{Binding}"
+                                ToolTipService.ToolTip="More actions" Padding="4,3"
+                                MinWidth="0" MinHeight="0">
+                            <FontIcon Glyph="&#xE712;" FontSize="11"/>
+                        </Button>
+                    </StackPanel>
+                </Grid>
+            </Border>
+        </DataTemplate>
+
+        <!-- Icon-mode template for groups (just the header, children rendered inline by the ListView) -->
+        <DataTemplate x:Key="IconModeGroupTemplate">
+            <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                    BorderThickness="1" CornerRadius="4" Margin="0,2"
+                    Loaded="ItemCard_Loaded"
+                    PointerEntered="ItemCard_PointerEntered" PointerExited="ItemCard_PointerExited">
+                <StackPanel Tag="GroupRoot" Loaded="GroupRoot_Loaded">
+                    <Grid ColumnSpacing="8" Padding="8,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <FontIcon Grid.Column="0" Glyph="&#xE700;" FontSize="12" Opacity="0.3" VerticalAlignment="Center"
+                                  ToolTipService.ToolTip="Drag to reorder"/>
+                        <Button Grid.Column="1" Click="ToggleGroupExpand_Click"
+                                Padding="4" Background="Transparent" BorderThickness="0"
+                                VerticalAlignment="Center">
+                            <FontIcon Glyph="&#xE70D;" FontSize="12" Opacity="0.6"/>
+                        </Button>
+                        <TextBlock Grid.Column="2" Text="{Binding Name}" FontWeight="SemiBold" FontSize="14" VerticalAlignment="Center"/>
+                        <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center" Spacing="4"
+                                    PointerEntered="ItemButtons_PointerEntered" PointerExited="ItemButtons_PointerExited">
+                            <Button Click="GroupMenu_Click" Tag="{Binding}"
+                                    ToolTipService.ToolTip="More actions" Padding="6,5">
+                                <FontIcon Glyph="&#xE712;" FontSize="14"/>
+                            </Button>
+                        </StackPanel>
+                    </Grid>
+                    <StackPanel Tag="GroupChildren" Margin="4,0,4,0">
+                        <ListView ItemsSource="{Binding Children}"
+                                  Tag="{Binding}"
+                                  CanDragItems="True" AllowDrop="True"
+                                  SelectionMode="None" MinHeight="36"
+                                  DragItemsStarting="GroupChildList_DragItemsStarting"
+                                  DragOver="GroupChildList_DragOver"
+                                  DragLeave="GroupChildList_DragLeave"
+                                  Drop="GroupChildList_Drop"
+                                  DragItemsCompleted="GroupChildList_DragItemsCompleted">
+                            <ListView.ItemsPanel>
+                                <ItemsPanelTemplate>
+                                    <ItemsWrapGrid Orientation="Horizontal" MaximumRowsOrColumns="10"/>
+                                </ItemsPanelTemplate>
+                            </ListView.ItemsPanel>
+                            <ListView.ItemTemplate>
+                                <StaticResource ResourceKey="IconModeItemTemplate"/>
+                            </ListView.ItemTemplate>
+                            <ListView.ItemContainerStyle>
+                                <Style TargetType="ListViewItem">
+                                    <Setter Property="Padding" Value="0"/>
+                                    <Setter Property="Margin" Value="0"/>
+                                    <Setter Property="MinWidth" Value="0"/>
+                                    <Setter Property="MinHeight" Value="0"/>
+                                </Style>
+                            </ListView.ItemContainerStyle>
+                        </ListView>
+                        <StackPanel Orientation="Horizontal" Spacing="8" Margin="12,8">
+                            <Button Click="ShowAddItemToGroup_Click" Tag="{Binding}">
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <FontIcon Glyph="&#xE710;" FontSize="14"/>
+                                    <TextBlock Text="Add Item"/>
+                                </StackPanel>
+                            </Button>
+                        </StackPanel>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+        </DataTemplate>
+
+        <pages:LauncherItemTemplateSelector x:Key="IconModeTemplateSelector"
+            LauncherItemTemplate="{StaticResource IconModeItemTemplate}"
+            GroupItemTemplate="{StaticResource IconModeGroupTemplate}"/>
+
+        <!-- Synthetic group template: just wrapping children, no card/header chrome -->
+        <DataTemplate x:Key="IconModeSyntheticGroupTemplate">
+            <ListView ItemsSource="{Binding Children}"
+                      Tag="{Binding}"
+                      CanDragItems="True" AllowDrop="True"
+                      SelectionMode="None" MinHeight="36"
+                      DragItemsStarting="GroupChildList_DragItemsStarting"
+                      DragOver="GroupChildList_DragOver"
+                      DragLeave="GroupChildList_DragLeave"
+                      Drop="GroupChildList_Drop"
+                      DragItemsCompleted="GroupChildList_DragItemsCompleted">
+                <ListView.ItemsPanel>
+                    <ItemsPanelTemplate>
+                        <ItemsWrapGrid Orientation="Horizontal" MaximumRowsOrColumns="10"/>
+                    </ItemsPanelTemplate>
+                </ListView.ItemsPanel>
+                <ListView.ItemTemplate>
+                    <StaticResource ResourceKey="IconModeItemTemplate"/>
+                </ListView.ItemTemplate>
+                <ListView.ItemContainerStyle>
+                    <Style TargetType="ListViewItem">
+                        <Setter Property="Padding" Value="0"/>
+                        <Setter Property="Margin" Value="0"/>
+                        <Setter Property="MinWidth" Value="0"/>
+                        <Setter Property="MinHeight" Value="0"/>
+                    </Style>
+                </ListView.ItemContainerStyle>
+            </ListView>
+        </DataTemplate>
 
 
     </Page.Resources>
@@ -146,7 +303,7 @@
         </StackPanel>
 
         <!-- Row 1: Columns panel — ScrollViewer enables horizontal scrolling when columns overflow -->
-        <ScrollViewer Grid.Row="1" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
+        <ScrollViewer x:Name="ColumnsScrollViewer" Grid.Row="1" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
             <Grid x:Name="ColumnsPanel"/>
         </ScrollViewer>
 
@@ -179,12 +336,6 @@
                         <StackPanel Orientation="Horizontal" Spacing="8">
                             <FontIcon Glyph="&#xF168;" FontSize="14"/>
                             <TextBlock Text="Add Group"/>
-                        </StackPanel>
-                    </Button>
-                    <Button Click="AddColumn_Click">
-                        <StackPanel Orientation="Horizontal" Spacing="8">
-                            <FontIcon Glyph="&#xE8C1;" FontSize="14"/>
-                            <TextBlock Text="Add Column"/>
                         </StackPanel>
                     </Button>
                     <Button Click="ImportBookmarks_Click">

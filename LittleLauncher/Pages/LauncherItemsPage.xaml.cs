@@ -25,11 +25,15 @@ public class LauncherItemTemplateSelector : DataTemplateSelector
 {
     public DataTemplate? LauncherItemTemplate { get; set; }
     public DataTemplate? GroupItemTemplate { get; set; }
+    public DataTemplate? SyntheticGroupTemplate { get; set; }
+    public HashSet<LauncherItem>? SyntheticGroups { get; set; }
 
     protected override DataTemplate? SelectTemplateCore(object item)
     {
         if (item is LauncherItem li)
         {
+            if (li.IsGroup && SyntheticGroups?.Contains(li) == true && SyntheticGroupTemplate != null)
+                return SyntheticGroupTemplate;
             if (li.IsGroup) return GroupItemTemplate;
         }
         return LauncherItemTemplate;
@@ -59,7 +63,9 @@ public partial class LauncherItemsPage : Page
     private LauncherItem? _dragItem;
     private ObservableCollection<LauncherItem>? _dragSourceCollection;
     private ListViewItem? _lastIndicatorContainer;
+    private ListView? _lastIndicatorListView;
     private bool _isReadOnly;
+    private Border? _newColumnDropZone;
 
     // -- Cached resources (created once, reused on every pointer/drag event) --
     private static readonly Microsoft.UI.Input.InputSystemCursor _sizeAllCursor =
@@ -74,6 +80,7 @@ public partial class LauncherItemsPage : Page
 
     // -- Column-based rendering state --
     private List<ObservableCollection<LauncherItem>> _columnLists = [];
+    private readonly HashSet<LauncherItem> _syntheticGroups = [];
 
     public LauncherItemsPage()
     {
@@ -98,6 +105,21 @@ public partial class LauncherItemsPage : Page
             PageSubtitle.Text = "Add, edit, or remove apps and websites from your little launcher. Drag items to reorder.";
 
         RebuildColumns();
+        ColumnsScrollViewer.AddHandler(
+            UIElement.PointerWheelChangedEvent,
+            new Microsoft.UI.Xaml.Input.PointerEventHandler(ColumnsScrollViewer_PointerWheelChanged),
+            true);
+    }
+
+    private void ColumnsScrollViewer_PointerWheelChanged(object sender, Microsoft.UI.Xaml.Input.PointerRoutedEventArgs e)
+    {
+        var props = e.GetCurrentPoint(ColumnsScrollViewer).Properties;
+        if (props.IsHorizontalMouseWheel || e.KeyModifiers.HasFlag(global::Windows.System.VirtualKeyModifiers.Shift))
+        {
+            var delta = props.IsHorizontalMouseWheel ? props.MouseWheelDelta : props.MouseWheelDelta;
+            ColumnsScrollViewer.ChangeView(ColumnsScrollViewer.HorizontalOffset - delta, null, null, true);
+            e.Handled = true;
+        }
     }
 
     private void BackToLayouts_Click(object sender, RoutedEventArgs e)
@@ -124,18 +146,37 @@ public partial class LauncherItemsPage : Page
     private void RebuildColumns()
     {
         _columnLists = BuildColumnLists();
+        _syntheticGroups.Clear();
+
+        // Auto-prune empty columns (e.g. after removing the last item via menu)
+        if (AutoRemoveEmptyColumns())
+        {
+            SyncColumnsToFlatList();
+            SettingsManager.SaveSettings();
+        }
+
+        // In icon mode, wrap consecutive ungrouped items into synthetic groups
+        // so they use the wrapping grid layout
+        bool isIconMode = TargetLauncher?.ViewMode != 1;
+        if (isIconMode)
+            WrapUngroupedItemsIntoSyntheticGroups();
+
         ColumnsPanel.Children.Clear();
         ColumnsPanel.ColumnDefinitions.Clear();
         ColumnsPanel.RowDefinitions.Clear();
 
         // Set up column definitions in the ColumnsPanel Grid
+        int colFixedWidth = isIconMode ? 265 : 280;
         for (int c = 0; c < _columnLists.Count; c++)
         {
             ColumnsPanel.ColumnDefinitions.Add(new ColumnDefinition
             {
-                Width = _columnLists.Count > 1 ? new GridLength(280) : new GridLength(1, GridUnitType.Star)
+                Width = _columnLists.Count > 1 ? new GridLength(colFixedWidth) : new GridLength(1, GridUnitType.Star)
             });
         }
+        // Extra column for the "new column" drop zone
+        ColumnsPanel.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
         // Two rows: Auto for header, Star for the ListView
         ColumnsPanel.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         ColumnsPanel.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
@@ -151,37 +192,18 @@ public partial class LauncherItemsPage : Page
             // Column header (shown when multiple columns exist)
             if (_columnLists.Count > 1)
             {
-                var headerGrid = new Grid { Margin = new Thickness(0, 0, 0, 4) };
-                headerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-                headerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-
                 var headerText = new TextBlock
                 {
                     Text = $"Column {colIdx + 1}",
                     FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
                     FontSize = 13,
                     Opacity = 0.6,
-                    VerticalAlignment = VerticalAlignment.Center
+                    VerticalAlignment = VerticalAlignment.Center,
+                    Margin = new Thickness(0, 0, 0, 4),
                 };
-                Grid.SetColumn(headerText, 0);
-                headerGrid.Children.Add(headerText);
-
-                if (!_isReadOnly && colIdx > 0)
-                {
-                    var removeColBtn = new Button
-                    {
-                        Content = new FontIcon { Glyph = "\uE74D", FontSize = 12 },
-                        Padding = new Thickness(6, 4, 6, 4),
-                        Tag = colIdx
-                    };
-                    ToolTipService.SetToolTip(removeColBtn, "Remove column (items move to previous column)");
-                    removeColBtn.Click += RemoveColumn_Click;
-                    Grid.SetColumn(removeColBtn, 1);
-                    headerGrid.Children.Add(removeColBtn);
-                }
-                Grid.SetRow(headerGrid, 0);
-                Grid.SetColumn(headerGrid, colIdx);
-                ColumnsPanel.Children.Add(headerGrid);
+                Grid.SetRow(headerText, 0);
+                Grid.SetColumn(headerText, colIdx);
+                ColumnsPanel.Children.Add(headerText);
             }
 
             // ListView for this column
@@ -192,8 +214,23 @@ public partial class LauncherItemsPage : Page
                 SelectionMode = ListViewSelectionMode.None,
                 Tag = colIdx
             };
-            lv.ItemTemplateSelector = (DataTemplateSelector)Resources["ItemTemplateSelector"];
-            lv.ItemContainerStyle = CreateItemContainerStyle();
+            if (isIconMode)
+            {
+                var baseSelector = (LauncherItemTemplateSelector)Resources["IconModeTemplateSelector"];
+                lv.ItemTemplateSelector = new LauncherItemTemplateSelector
+                {
+                    LauncherItemTemplate = baseSelector.LauncherItemTemplate,
+                    GroupItemTemplate = baseSelector.GroupItemTemplate,
+                    SyntheticGroupTemplate = (DataTemplate)Resources["IconModeSyntheticGroupTemplate"],
+                    SyntheticGroups = _syntheticGroups,
+                };
+                lv.ItemContainerStyle = CreateIconModeContainerStyle();
+            }
+            else
+            {
+                lv.ItemTemplateSelector = (DataTemplateSelector)Resources["ItemTemplateSelector"];
+                lv.ItemContainerStyle = CreateItemContainerStyle();
+            }
             lv.ItemsSource = colItems;
             lv.DragItemsStarting += ColumnListView_DragItemsStarting;
             lv.DragOver += ColumnListView_DragOver;
@@ -205,6 +242,39 @@ public partial class LauncherItemsPage : Page
             Grid.SetColumn(lv, colIdx);
             ColumnsPanel.Children.Add(lv);
         }
+
+        // "New column" drop zone (visible during drag, to the right of all columns)
+        if (!_isReadOnly)
+        {
+            _newColumnDropZone = new Border
+            {
+                AllowDrop = true,
+                MinWidth = 100,
+                CornerRadius = new CornerRadius(8),
+                BorderBrush = AccentBrush,
+                BorderThickness = new Thickness(0),
+                Background = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["SubtleFillColorTransparentBrush"],
+                Visibility = Visibility.Collapsed,
+                VerticalAlignment = VerticalAlignment.Stretch,
+                Child = new StackPanel
+                {
+                    VerticalAlignment = VerticalAlignment.Center,
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                    Spacing = 4,
+                    Children =
+                    {
+                        new FontIcon { Glyph = "\uE710", FontSize = 16, Opacity = 0.6, HorizontalAlignment = HorizontalAlignment.Center },
+                        new TextBlock { Text = "New\nColumn", FontSize = 12, Opacity = 0.6, TextAlignment = TextAlignment.Center },
+                    }
+                },
+            };
+            _newColumnDropZone.DragOver += NewColumnZone_DragOver;
+            _newColumnDropZone.Drop += NewColumnZone_Drop;
+            Grid.SetRow(_newColumnDropZone, 0);
+            Grid.SetRowSpan(_newColumnDropZone, 2);
+            Grid.SetColumn(_newColumnDropZone, _columnLists.Count);
+            ColumnsPanel.Children.Add(_newColumnDropZone);
+        }
     }
 
     private static Style CreateItemContainerStyle()
@@ -214,6 +284,25 @@ public partial class LauncherItemsPage : Page
         style.Setters.Add(new Setter(ListViewItem.MarginProperty, new Thickness(0)));
         style.Setters.Add(new Setter(ListViewItem.HorizontalContentAlignmentProperty, HorizontalAlignment.Stretch));
         return style;
+    }
+
+    private static Style CreateIconModeContainerStyle()
+    {
+        var style = new Style(typeof(ListViewItem));
+        style.Setters.Add(new Setter(ListViewItem.PaddingProperty, new Thickness(0)));
+        style.Setters.Add(new Setter(ListViewItem.MarginProperty, new Thickness(0)));
+        style.Setters.Add(new Setter(ListViewItem.MinWidthProperty, 0.0));
+        style.Setters.Add(new Setter(ListViewItem.MinHeightProperty, 0.0));
+        style.Setters.Add(new Setter(ListViewItem.HorizontalContentAlignmentProperty, HorizontalAlignment.Stretch));
+        return style;
+    }
+
+    private static ItemsPanelTemplate CreateWrapGridItemsPanel()
+    {
+        var xaml = "<ItemsPanelTemplate xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation'>" +
+                   "<ItemsWrapGrid Orientation='Horizontal' MaximumRowsOrColumns='10'/>" +
+                   "</ItemsPanelTemplate>";
+        return (ItemsPanelTemplate)Microsoft.UI.Xaml.Markup.XamlReader.Load(xaml);
     }
 
     /// <summary>
@@ -240,6 +329,42 @@ public partial class LauncherItemsPage : Page
     }
 
     /// <summary>
+    /// In icon mode, wraps consecutive ungrouped items into synthetic groups
+    /// so they render in wrapping grids instead of one-per-row.
+    /// </summary>
+    private void WrapUngroupedItemsIntoSyntheticGroups()
+    {
+        for (int c = 0; c < _columnLists.Count; c++)
+        {
+            var col = _columnLists[c];
+            var newCol = new ObservableCollection<LauncherItem>();
+            LauncherItem? currentSynthetic = null;
+
+            for (int i = 0; i < col.Count; i++)
+            {
+                var item = col[i];
+                if (item.IsGroup)
+                {
+                    currentSynthetic = null;
+                    newCol.Add(item);
+                }
+                else
+                {
+                    if (currentSynthetic == null)
+                    {
+                        currentSynthetic = new LauncherItem { Name = "", IsGroup = true, IsExpanded = true };
+                        _syntheticGroups.Add(currentSynthetic);
+                        newCol.Add(currentSynthetic);
+                    }
+                    currentSynthetic.Children.Add(item);
+                }
+            }
+
+            _columnLists[c] = newCol;
+        }
+    }
+
+    /// <summary>
     /// Writes the column lists back to the flat CurrentItems collection,
     /// inserting column break sentinels between columns.
     /// </summary>
@@ -252,7 +377,18 @@ public partial class LauncherItemsPage : Page
             if (c > 0)
                 items.Add(LauncherItem.CreateColumnBreak());
             foreach (var item in _columnLists[c])
-                items.Add(item);
+            {
+                if (_syntheticGroups.Contains(item))
+                {
+                    // Unwrap synthetic group back to individual items
+                    foreach (var child in item.Children)
+                        items.Add(child);
+                }
+                else
+                {
+                    items.Add(item);
+                }
+            }
         }
     }
 
@@ -281,6 +417,7 @@ public partial class LauncherItemsPage : Page
             _dragItem = item;
             _dragSourceCollection = _columnLists[colIdx];
             e.Data.RequestedOperation = global::Windows.ApplicationModel.DataTransfer.DataPackageOperation.Move;
+            ShowNewColumnDropZone();
         }
     }
 
@@ -300,7 +437,10 @@ public partial class LauncherItemsPage : Page
         if (dropIndex < targetCol.Count)
         {
             var targetItem = targetCol[dropIndex];
-            e.DragUIOverride.Caption = $"Move above {targetItem.Name}";
+            bool isGrid = lv.ItemsPanelRoot is ItemsWrapGrid;
+            e.DragUIOverride.Caption = isGrid
+                ? $"Move before {targetItem.Name}"
+                : $"Move above {targetItem.Name}";
         }
         else
         {
@@ -318,6 +458,7 @@ public partial class LauncherItemsPage : Page
     private void ColumnListView_Drop(object sender, DragEventArgs e)
     {
         ClearInsertionIndicator();
+        HideNewColumnDropZone();
         if (_dragItem == null || _dragSourceCollection == null) return;
         if (sender is not ListView lv || lv.Tag is not int colIdx) return;
 
@@ -336,6 +477,12 @@ public partial class LauncherItemsPage : Page
         _dragSourceCollection = null;
 
         SyncColumnsToFlatList();
+        bool columnsChanged = AutoRemoveEmptyColumns();
+        if (columnsChanged)
+        {
+            SyncColumnsToFlatList();
+            RebuildColumns();
+        }
         SaveAndUpdateTaskbar();
         e.Handled = true;
     }
@@ -343,6 +490,7 @@ public partial class LauncherItemsPage : Page
     private void ColumnListView_DragItemsCompleted(ListViewBase sender, DragItemsCompletedEventArgs args)
     {
         ClearInsertionIndicator();
+        HideNewColumnDropZone();
         TopLevelDropZone.Visibility = Visibility.Collapsed;
         _dragItem = null;
         _dragSourceCollection = null;
@@ -420,7 +568,9 @@ public partial class LauncherItemsPage : Page
                 fe.Visibility = Visibility.Collapsed;
 
             // Hide action buttons on load (use Opacity to preserve layout height)
-            if (Grid.GetColumn(fe) == 3 && fe is StackPanel sp)
+            // Column 3 for list mode (4-col grid), Column 2 for icon mode (3-col grid)
+            int col = Grid.GetColumn(fe);
+            if ((col == 3 || col == 2) && fe is StackPanel sp && sp.Orientation == Orientation.Horizontal)
             {
                 sp.Opacity = 0;
                 sp.IsHitTestVisible = false;
@@ -503,12 +653,13 @@ public partial class LauncherItemsPage : Page
 
     private static StackPanel? FindButtonsPanel(Border border)
     {
-        // The buttons panel is the Column 3 StackPanel in the header Grid
+        // The buttons panel is the last-column StackPanel in the header Grid
+        // Column 3 for list mode (4-col grid), Column 2 for icon mode (3-col grid)
         if (border.Child is not Panel panel) return null;
         var grid = panel as Grid ?? (panel as StackPanel)?.Children.FirstOrDefault() as Grid;
         if (grid == null) return null;
         foreach (var child in grid.Children)
-            if (child is StackPanel sp && Grid.GetColumn(sp) == 3)
+            if (child is StackPanel sp && (Grid.GetColumn(sp) == 3 || Grid.GetColumn(sp) == 2))
                 return sp;
         return null;
     }
@@ -865,6 +1016,7 @@ public partial class LauncherItemsPage : Page
             // Show the top-level drop zone so the user can pull items out of groups.
             TopLevelDropZone.Visibility = Visibility.Visible;
             TopLevelDropZone.BorderThickness = new Thickness(2);
+            ShowNewColumnDropZone();
         }
     }
 
@@ -890,7 +1042,14 @@ public partial class LauncherItemsPage : Page
         e.DragUIOverride.IsCaptionVisible = true;
         e.DragUIOverride.IsGlyphVisible = true;
         if (dropIndex < group.Children.Count)
-            e.DragUIOverride.Caption = $"Move above {group.Children[dropIndex].Name}";
+        {
+            bool isGrid = lv.ItemsPanelRoot is ItemsWrapGrid;
+            e.DragUIOverride.Caption = isGrid
+                ? $"Move before {group.Children[dropIndex].Name}"
+                : $"Move above {group.Children[dropIndex].Name}";
+        }
+        else if (group.Children.Count == 0)
+            e.DragUIOverride.Caption = $"Move into {group.Name}";
         else
             e.DragUIOverride.Caption = $"Move to end of {group.Name}";
 
@@ -905,6 +1064,7 @@ public partial class LauncherItemsPage : Page
     private void GroupChildList_Drop(object sender, DragEventArgs e)
     {
         ClearInsertionIndicator();
+        HideNewColumnDropZone();
         if (sender is not ListView lv || lv.Tag is not LauncherItem group) return;
         if (_dragItem == null || _dragSourceCollection == null || _dragItem.IsGroup || _dragItem.IsColumnBreak) return;
 
@@ -923,6 +1083,12 @@ public partial class LauncherItemsPage : Page
         TopLevelDropZone.Visibility = Visibility.Collapsed;
 
         SyncColumnsToFlatList();
+        bool columnsChanged = AutoRemoveEmptyColumns();
+        if (columnsChanged)
+        {
+            SyncColumnsToFlatList();
+            RebuildColumns();
+        }
         SaveAndUpdateTaskbar();
         e.Handled = true;
     }
@@ -930,6 +1096,7 @@ public partial class LauncherItemsPage : Page
     private void GroupChildList_DragItemsCompleted(ListViewBase sender, DragItemsCompletedEventArgs args)
     {
         ClearInsertionIndicator();
+        HideNewColumnDropZone();
         TopLevelDropZone.Visibility = Visibility.Collapsed;
         _dragItem = null;
         _dragSourceCollection = null;
@@ -954,6 +1121,7 @@ public partial class LauncherItemsPage : Page
     private void TopLevelDropZone_Drop(object sender, DragEventArgs e)
     {
         ClearInsertionIndicator();
+        HideNewColumnDropZone();
         if (_dragItem == null || _dragSourceCollection == null) return;
         // Only accept drops from group children
         if (_columnLists.Contains(_dragSourceCollection)) return;
@@ -972,23 +1140,115 @@ public partial class LauncherItemsPage : Page
         e.Handled = true;
     }
 
+    // -- New-column drop zone --
+
+    private void NewColumnZone_DragOver(object sender, DragEventArgs e)
+    {
+        if (_dragItem == null || _dragSourceCollection == null) return;
+
+        e.AcceptedOperation = global::Windows.ApplicationModel.DataTransfer.DataPackageOperation.Move;
+        e.DragUIOverride.IsCaptionVisible = true;
+        e.DragUIOverride.IsGlyphVisible = true;
+        e.DragUIOverride.Caption = "New column";
+        if (_newColumnDropZone != null)
+            _newColumnDropZone.BorderThickness = new Thickness(2);
+        e.Handled = true;
+    }
+
+    private void NewColumnZone_Drop(object sender, DragEventArgs e)
+    {
+        if (_dragItem == null || _dragSourceCollection == null) return;
+
+        _dragSourceCollection.Remove(_dragItem);
+
+        // Create new column with the dropped item
+        var newCol = new ObservableCollection<LauncherItem> { _dragItem };
+        _columnLists.Add(newCol);
+
+        _dragItem = null;
+        _dragSourceCollection = null;
+
+        SyncColumnsToFlatList();
+        AutoRemoveEmptyColumns();
+        SaveAndUpdateTaskbar();
+        RebuildColumns();
+        e.Handled = true;
+    }
+
+    /// <summary>
+    /// Removes any empty columns from _columnLists and re-syncs the flat list.
+    /// Called after drops that might leave a source column empty.
+    /// </summary>
+    private bool AutoRemoveEmptyColumns()
+    {
+        // Always keep at least one column
+        bool removed = false;
+        for (int i = _columnLists.Count - 1; i >= 0; i--)
+        {
+            if (_columnLists[i].Count == 0 && _columnLists.Count > 1)
+            {
+                _columnLists.RemoveAt(i);
+                removed = true;
+            }
+        }
+        return removed;
+    }
+
+    private void ShowNewColumnDropZone()
+    {
+        if (_newColumnDropZone != null)
+        {
+            _newColumnDropZone.Visibility = Visibility.Visible;
+            _newColumnDropZone.BorderThickness = new Thickness(0);
+        }
+    }
+
+    private void HideNewColumnDropZone()
+    {
+        if (_newColumnDropZone != null)
+        {
+            _newColumnDropZone.Visibility = Visibility.Collapsed;
+            _newColumnDropZone.BorderThickness = new Thickness(0);
+        }
+    }
+
     // -- Insertion indicator helpers --
 
     private void ShowInsertionIndicator(ListView listView, int dropIndex)
     {
         ClearInsertionIndicator();
 
-        // Show a colored top-border on the item at dropIndex, or bottom-border on the last item.
+        // Empty list: highlight the ListView itself as a drop target
+        if (listView.Items.Count == 0)
+        {
+            _lastIndicatorListView = listView;
+            listView.BorderBrush = AccentBrush;
+            listView.BorderThickness = new Thickness(2);
+            return;
+        }
+
+        bool isGrid = listView.ItemsPanelRoot is ItemsWrapGrid;
+
         int targetIndex = dropIndex < listView.Items.Count ? dropIndex : listView.Items.Count - 1;
         if (targetIndex < 0) return;
+        if (listView.ContainerFromIndex(targetIndex) is not ListViewItem container) return;
 
-        if (listView.ContainerFromIndex(targetIndex) is ListViewItem container)
+        _lastIndicatorContainer = container;
+        container.BorderBrush = AccentBrush;
+
+        if (isGrid)
         {
-            _lastIndicatorContainer = container;
-            container.BorderBrush = AccentBrush;
+            // Icon grid: vertical line to the left/right of a tile
             container.BorderThickness = dropIndex < listView.Items.Count
-                ? new Thickness(0, 3, 0, 0)   // line above
-                : new Thickness(0, 0, 0, 3);  // line below last item
+                ? new Thickness(3, 0, 0, 0)
+                : new Thickness(0, 0, 3, 0);
+        }
+        else
+        {
+            // List mode: horizontal line above/below
+            container.BorderThickness = dropIndex < listView.Items.Count
+                ? new Thickness(0, 3, 0, 0)
+                : new Thickness(0, 0, 0, 3);
         }
     }
 
@@ -999,6 +1259,12 @@ public partial class LauncherItemsPage : Page
             _lastIndicatorContainer.BorderBrush = null;
             _lastIndicatorContainer.BorderThickness = new Thickness(0);
             _lastIndicatorContainer = null;
+        }
+        if (_lastIndicatorListView != null)
+        {
+            _lastIndicatorListView.BorderBrush = null;
+            _lastIndicatorListView.BorderThickness = new Thickness(0);
+            _lastIndicatorListView = null;
         }
     }
 
@@ -1762,6 +2028,10 @@ public partial class LauncherItemsPage : Page
     /// </summary>
     private static int GetDropIndex(ListView listView, DragEventArgs e)
     {
+        // Dispatch to grid hit-testing if the ListView uses ItemsWrapGrid
+        if (listView.ItemsPanelRoot is ItemsWrapGrid)
+            return GetDropIndexGrid(listView, e);
+
         var position = e.GetPosition(listView);
         for (int i = 0; i < listView.Items.Count; i++)
         {
@@ -1772,6 +2042,57 @@ public partial class LauncherItemsPage : Page
                 return i;
         }
         return listView.Items.Count;
+    }
+
+    /// <summary>
+    /// 2D drop index for icon mode grids (ItemsWrapGrid layout).
+    /// Finds the closest item boundary based on both X and Y coordinates.
+    /// </summary>
+    private static int GetDropIndexGrid(ListView listView, DragEventArgs e)
+    {
+        var position = e.GetPosition(listView);
+        int count = listView.Items.Count;
+        if (count == 0) return 0;
+
+        // Find which row the cursor is on, then which column
+        int bestIndex = count; // default: append
+        double bestDist = double.MaxValue;
+
+        for (int i = 0; i < count; i++)
+        {
+            if (listView.ContainerFromIndex(i) is not ListViewItem container) continue;
+            var transform = container.TransformToVisual(listView);
+            var pt = transform.TransformPoint(new global::Windows.Foundation.Point(0, 0));
+
+            double top = pt.Y;
+            double bottom = top + container.ActualHeight;
+            double left = pt.X;
+            double right = left + container.ActualWidth;
+            double midX = left + container.ActualWidth / 2;
+
+            // Only consider items on the row the cursor is in (or closest row)
+            if (position.Y >= top && position.Y < bottom)
+            {
+                // Cursor is on this item's row — pick based on X midpoint
+                if (position.X < midX)
+                    return i; // insert before this item
+                // else keep looking at next items on this row
+                bestIndex = i + 1;
+                bestDist = 0;
+            }
+            else if (bestDist > 0)
+            {
+                // Cursor is between rows or below all rows — track closest
+                double vertDist = position.Y < top ? top - position.Y : position.Y - bottom;
+                if (vertDist < bestDist)
+                {
+                    bestDist = vertDist;
+                    bestIndex = position.X < midX ? i : i + 1;
+                }
+            }
+        }
+
+        return Math.Min(bestIndex, count);
     }
 
     private static void InitializePicker(object picker)

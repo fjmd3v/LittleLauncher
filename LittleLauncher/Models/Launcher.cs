@@ -41,6 +41,13 @@ public partial class Launcher : ObservableObject
     public partial bool NIconHide { get; set; }
 
     /// <summary>
+    /// Flyout display mode for this launcher.
+    /// 0 = List (icon + name side by side), 1 = Icon (larger icon with name below, wrapping grid).
+    /// </summary>
+    [ObservableProperty]
+    public partial int ViewMode { get; set; }
+
+    /// <summary>
     /// The launcher items (shortcuts, groups, headings, column breaks) in this launcher.
     /// Serialized as a JSON array.
     /// </summary>
