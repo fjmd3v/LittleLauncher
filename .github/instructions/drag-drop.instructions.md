@@ -41,7 +41,7 @@ The settings page renders launcher items in a multi-column Grid (`ColumnsPanel`)
 
 ### Insertion indicators
 
-`ShowInsertionIndicator(ListView, int)` sets an accent-colored 2px border (top or bottom) on the `ListViewItem` at the target position. `ClearInsertionIndicator()` resets the last indicator via `_lastIndicatorContainer`.
+`ShowInsertionIndicator(ListView, int)` sets an accent-colored 3px border on the `ListViewItem` at the target position. In list mode this is a horizontal line (top or bottom); in icon-grid mode it's a vertical line (left or right). In grid mode, a compensating negative padding is applied on the same side so the container's outer dimensions stay constant and the `ItemsWrapGrid` doesn't reflow. `ClearInsertionIndicator()` resets the border, padding, and margin via `_lastIndicatorContainer`.
 
 ### Drag captions
 
