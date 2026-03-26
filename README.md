@@ -18,7 +18,19 @@
 </p>
 
 <p align="center">
-  <img src="docs/screenshot.png" alt="Little Launcher flyout" width="720">
+  <img src="docs/list-mode.png" alt="Little Launcher flyout — list mode" width="720">
+</p>
+
+<p align="center">
+  <img src="docs/icon-mode.png" alt="Little Launcher flyout — icon mode" width="720">
+</p>
+
+<p align="center">
+  <img src="docs/launchers.png" alt="Launcher settings" width="720">
+</p>
+
+<p align="center">
+  <img src="docs/launcher-items.png" alt="Launcher items settings" width="720">
 </p>
 
 ## Overview
