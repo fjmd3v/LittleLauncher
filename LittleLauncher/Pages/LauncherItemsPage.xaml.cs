@@ -1238,10 +1238,19 @@ public partial class LauncherItemsPage : Page
 
         if (isGrid)
         {
-            // Icon grid: vertical line to the left/right of a tile
-            container.BorderThickness = dropIndex < listView.Items.Count
-                ? new Thickness(3, 0, 0, 0)
-                : new Thickness(0, 0, 3, 0);
+            // Icon grid: vertical line to the left/right of a tile.
+            // Use negative padding to steal space from inside the container so
+            // the outer dimensions stay constant and the wrap grid doesn't reflow.
+            if (dropIndex < listView.Items.Count)
+            {
+                container.BorderThickness = new Thickness(3, 0, 0, 0);
+                container.Padding = new Thickness(-3, 0, 0, 0);
+            }
+            else
+            {
+                container.BorderThickness = new Thickness(0, 0, 3, 0);
+                container.Padding = new Thickness(0, 0, -3, 0);
+            }
         }
         else
         {
@@ -1258,6 +1267,8 @@ public partial class LauncherItemsPage : Page
         {
             _lastIndicatorContainer.BorderBrush = null;
             _lastIndicatorContainer.BorderThickness = new Thickness(0);
+            _lastIndicatorContainer.Padding = new Thickness(0);
+            _lastIndicatorContainer.Margin = new Thickness(0);
             _lastIndicatorContainer = null;
         }
         if (_lastIndicatorListView != null)
