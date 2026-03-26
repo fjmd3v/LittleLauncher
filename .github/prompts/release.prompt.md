@@ -17,21 +17,9 @@ Create a new release for Little Launcher.
    - Bump the appropriate component (patch/minor/major) and reset lower components to 0
    - Confirm with the user: "Releasing vX.Y.Z — proceed?"
 
-2. **Review and update documentation** (mandatory before committing):
-   - Run `git log <previous-tag>..HEAD --oneline` to see all commits since the last release
-   - Cross-reference each commit against the Documentation Maintenance table in `copilot-instructions.md`
-   - Read and update every instruction/doc file that is affected:
-     - New/changed service or class → `copilot-instructions.md` Key namespaces table
-     - New/changed settings property → `user-settings.instructions.md`
-     - New/changed P/Invoke → `pinvoke.instructions.md`
-     - New/changed XAML patterns → `xaml.instructions.md`
-     - Icon system changes → `icons.instructions.md`
-     - Drag-and-drop changes → `drag-drop.instructions.md`
-     - Installer changes → `installer.instructions.md`
-     - New page or navigation → `copilot-instructions.md` Architecture section
-     - New dependency → `copilot-instructions.md` Dependencies list
-     - Any structural change → `ARCHITECTURE.md`, `README.md`
-   - If an instruction file's `applyTo` glob wouldn't match new files created in this release, widen it
+2. **Review and update documentation**:
+   - Follow the documentation review process from `commit.prompt.md` step 2
+   - The diff to review is everything since the last tag: `git log <previous-tag>..HEAD --oneline`
    - Include updated doc files in the version-bump commit
    - If no docs need updating, explicitly confirm that before proceeding
 
