@@ -18,9 +18,9 @@
 </p>
 
 <p align="center">
-  <img src="docs/list-launcher.png" alt="Flyout — list view" width="300">
-  &nbsp;&nbsp;
   <img src="docs/icon-launcher.png" alt="Flyout — icon view" width="300">
+  &nbsp;&nbsp;
+  <img src="docs/list-launcher.png" alt="Flyout — list view" width="300">
 </p>
 
 <p align="center">
@@ -28,19 +28,23 @@
 </p>
 
 <p align="center">
+  <img src="docs/list-launcher-multiple-cols.png" alt="Flyout — list view with multiple columns" width="720">
+</p>
+
+<p align="center">
   <img src="docs/launchers.png" alt="Launchers page" width="720">
 </p>
 
 <p align="center">
-  <img src="docs/launcher-settings.png" alt="Launcher settings dialog" width="720">
+  <img src="docs/icon-launcher-settings.png" alt="Launcher settings dialog" width="720">
 </p>
 
 <p align="center">
-  <img src="docs/launcher-items.png" alt="Launcher items — icon mode" width="720">
+  <img src="docs/icon-launcher-items.png" alt="Launcher items — icon mode" width="720">
 </p>
 
 <p align="center">
-  <img src="docs/list-settings.png" alt="Launcher items — list mode" width="720">
+  <img src="docs/list-launcher-items.png" alt="Launcher items — list mode" width="720">
 </p>
 
 ## Overview

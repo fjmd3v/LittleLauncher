@@ -1002,7 +1002,7 @@ public partial class FlyoutWindow : Window
         }
     }
 
-    private void ContextEditLauncherItem_Click(object sender, RoutedEventArgs e)
+    private void ContextEditLauncherSettings_Click(object sender, RoutedEventArgs e)
     {
         HideFlyout();
         _lastDismissed = DateTime.UtcNow;
@@ -1010,10 +1010,19 @@ public partial class FlyoutWindow : Window
         {
             SettingsWindow.ShowInstance(_owner);
             var sw = SettingsWindow.GetCurrent();
-            if (sw != null)
-            {
-                sw.DispatcherQueue.TryEnqueue(() => sw.NavigateToLauncherItems(_launcher));
-            }
+            sw?.DispatcherQueue.TryEnqueue(() => sw.NavigateToLauncherSettings(_launcher));
+        }
+    }
+
+    private void ContextEditLauncherItems_Click(object sender, RoutedEventArgs e)
+    {
+        HideFlyout();
+        _lastDismissed = DateTime.UtcNow;
+        if (_owner != null)
+        {
+            SettingsWindow.ShowInstance(_owner);
+            var sw = SettingsWindow.GetCurrent();
+            sw?.DispatcherQueue.TryEnqueue(() => sw.NavigateToLauncherItems(_launcher));
         }
     }
 

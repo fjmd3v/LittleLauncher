@@ -19,10 +19,32 @@ namespace LittleLauncher.Pages;
 
 public sealed partial class LaunchersPage : Page
 {
+    /// <summary>
+    /// Set before navigating to LaunchersPage to auto-open the settings dialog for this launcher.
+    /// </summary>
+    internal static Launcher? PendingSettingsLauncher { get; set; }
+
     public LaunchersPage()
     {
         InitializeComponent();
         RebuildLauncherCards();
+
+        if (PendingSettingsLauncher is not null)
+        {
+            // Defer to Loaded — XamlRoot is null during the constructor,
+            // so the ContentDialog can't show until the page is in the visual tree.
+            Loaded += LaunchersPage_PendingSettingsLoaded;
+        }
+    }
+
+    private void LaunchersPage_PendingSettingsLoaded(object sender, RoutedEventArgs e)
+    {
+        Loaded -= LaunchersPage_PendingSettingsLoaded;
+        if (PendingSettingsLauncher is { } pending)
+        {
+            PendingSettingsLauncher = null;
+            _ = ShowLauncherSettingsDialog(pending);
+        }
     }
 
     // ── Build the UI dynamically (one card per launcher) ──────────────
@@ -549,6 +571,8 @@ public sealed partial class LaunchersPage : Page
     }
 
     // ── Launcher settings dialog ────────────────────────────────────
+
+    internal async Task ShowLauncherSettingsDialogPublic(Launcher launcher) => await ShowLauncherSettingsDialog(launcher);
 
     private async Task ShowLauncherSettingsDialog(Launcher launcher)
     {

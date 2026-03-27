@@ -299,20 +299,28 @@ public sealed partial class MainWindow : Window
     {
         var popup = new H.NotifyIcon.Core.PopupMenu();
 
-        // "Edit Launcher" — drill into this launcher's items page
         if (launcherId != null)
         {
             var launcher = SettingsManager.Current.Launchers.FirstOrDefault(l => l.Id == launcherId);
             if (launcher != null)
             {
-                var editItem = new H.NotifyIcon.Core.PopupMenuItem { Text = $"Edit {launcher.Name}" };
-                editItem.Click += (s, e) =>
+                var editSettings = new H.NotifyIcon.Core.PopupMenuItem { Text = "Edit Launcher Settings" };
+                editSettings.Click += (s, e) =>
+                {
+                    SettingsWindow.ShowInstance(this);
+                    var sw = SettingsWindow.GetCurrent();
+                    sw?.DispatcherQueue.TryEnqueue(() => sw.NavigateToLauncherSettings(launcher));
+                };
+                popup.Items.Add(editSettings);
+
+                var editItems = new H.NotifyIcon.Core.PopupMenuItem { Text = "Edit Launcher Items" };
+                editItems.Click += (s, e) =>
                 {
                     SettingsWindow.ShowInstance(this);
                     var sw = SettingsWindow.GetCurrent();
                     sw?.DispatcherQueue.TryEnqueue(() => sw.NavigateToLauncherItems(launcher));
                 };
-                popup.Items.Add(editItem);
+                popup.Items.Add(editItems);
             }
         }
 

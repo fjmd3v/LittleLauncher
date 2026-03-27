@@ -175,7 +175,12 @@
 
         <Grid.ContextFlyout>
             <MenuFlyout>
-                <MenuFlyoutItem x:Name="ContextEditLauncherItem" Text="Edit Launcher" Click="ContextEditLauncherItem_Click">
+                <MenuFlyoutItem x:Name="ContextEditLauncherSettings" Text="Edit Launcher Settings" Click="ContextEditLauncherSettings_Click">
+                    <MenuFlyoutItem.Icon>
+                        <FontIcon Glyph="&#xE713;" />
+                    </MenuFlyoutItem.Icon>
+                </MenuFlyoutItem>
+                <MenuFlyoutItem x:Name="ContextEditLauncherItems" Text="Edit Launcher Items" Click="ContextEditLauncherItems_Click">
                     <MenuFlyoutItem.Icon>
                         <FontIcon Glyph="&#xE70F;" />
                     </MenuFlyoutItem.Icon>

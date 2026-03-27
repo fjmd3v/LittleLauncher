@@ -320,6 +320,37 @@ public sealed partial class SettingsWindow : Window
         ContentFrame.Navigate(typeof(LauncherItemsPage));
     }
 
+    /// <summary>
+    /// Navigate to the Launchers page and auto-open the settings dialog for the given launcher.
+    /// </summary>
+    public void NavigateToLauncherSettings(Launcher launcher)
+    {
+        // If LaunchersPage is already displayed, call the dialog directly
+        if (ContentFrame.Content is LaunchersPage existingPage)
+        {
+            _ = existingPage.ShowLauncherSettingsDialogPublic(launcher);
+            return;
+        }
+
+        // Set pending BEFORE selecting the nav item, because SelectedItem
+        // triggers SelectionChanged → Navigate synchronously, which creates
+        // the LaunchersPage instance that checks PendingSettingsLauncher.
+        LaunchersPage.PendingSettingsLauncher = launcher;
+
+        foreach (var item in RootNavigation.MenuItems.OfType<NavigationViewItem>())
+        {
+            if (item.Tag as string == "LaunchersPage")
+            {
+                RootNavigation.SelectedItem = item;
+                break;
+            }
+        }
+
+        // If SelectionChanged didn't navigate (e.g. already selected), force it
+        if (ContentFrame.Content is not LaunchersPage)
+            ContentFrame.Navigate(typeof(LaunchersPage));
+    }
+
     private void SettingsWindow_Closed(object sender, WindowEventArgs e)
     {
         // Save window state (size, position, maximized)
