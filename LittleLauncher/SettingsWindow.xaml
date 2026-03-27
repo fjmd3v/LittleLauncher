@@ -31,7 +31,7 @@
         <NavigationView x:Name="RootNavigation" Grid.Row="1"
                         PaneDisplayMode="Left"
                         IsPaneToggleButtonVisible="True"
-                        OpenPaneLength="250"
+                        OpenPaneLength="180"
                         IsBackButtonVisible="Collapsed"
                         IsSettingsVisible="True"
                         SelectionChanged="RootNavigation_SelectionChanged">
