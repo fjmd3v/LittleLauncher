@@ -479,79 +479,84 @@ internal static partial class FaviconService
                 if (hr != 0 || hBitmap == IntPtr.Zero)
                     return null;
 
-                // GetObject with DIBSECTION retrieves the BITMAPINFOHEADER
-                // whose biHeight sign tells us the row order:
-                //   positive = bottom-up (rows stored bottom-to-top)
-                //   negative = top-down  (rows stored top-to-bottom)
-                // The plain BITMAP struct always has positive bmHeight.
-                bool bottomUp;
-                int width, height;
-                if (NativeMethods.GetObjectDibSection(hBitmap,
-                    Marshal.SizeOf<NativeMethods.DIBSECTION>(), out var ds) > 0
-                    && ds.dsBmih.biSize >= 40)
-                {
-                    width = ds.dsBm.bmWidth;
-                    height = Math.Abs(ds.dsBmih.biHeight);
-                    bottomUp = ds.dsBmih.biHeight > 0;
-                }
-                else
-                {
-                    NativeMethods.GetObject(hBitmap,
-                        Marshal.SizeOf<NativeMethods.BITMAP>(), out var bm2);
-                    width = bm2.bmWidth;
-                    height = bm2.bmHeight;
-                    bottomUp = true; // assume bottom-up for plain DDBs
-                }
-
                 NativeMethods.GetObject(hBitmap,
                     Marshal.SizeOf<NativeMethods.BITMAP>(), out var bm);
+                int width = bm.bmWidth;
+                int height = bm.bmHeight;
+                if (width <= 0 || height <= 0)
+                    return null;
 
-                if (bm.bmBits != IntPtr.Zero && bm.bmBitsPixel == 32)
+                // BitBlt the source HBITMAP into a top-down 32bpp DIB section
+                // we control. This avoids orientation ambiguity from the source
+                // (DDB vs DIB, bottom-up vs top-down).
+                var bmi = new NativeMethods.BITMAPINFO
                 {
-                    using var bmp = new Bitmap(width, height,
-                        System.Drawing.Imaging.PixelFormat.Format32bppPArgb);
-                    var rect = new Rectangle(0, 0, width, height);
-                    var data = bmp.LockBits(rect,
-                        System.Drawing.Imaging.ImageLockMode.WriteOnly,
-                        System.Drawing.Imaging.PixelFormat.Format32bppPArgb);
-                    try
+                    bmiHeader = new NativeMethods.BITMAPINFOHEADER
                     {
-                        int stride = width * 4;
-                        if (bottomUp)
-                        {
-                            // DIB rows are bottom-to-top; copy row-by-row in reverse
-                            unsafe
-                            {
-                                byte* src = (byte*)bm.bmBits;
-                                byte* dst = (byte*)data.Scan0;
-                                for (int y = 0; y < height; y++)
-                                {
-                                    Buffer.MemoryCopy(
-                                        src + (height - 1 - y) * stride,
-                                        dst + y * data.Stride,
-                                        stride, stride);
-                                }
-                            }
-                        }
-                        else
-                        {
-                            int byteCount = height * data.Stride;
-                            unsafe
-                            {
-                                Buffer.MemoryCopy(
-                                    (void*)bm.bmBits, (void*)data.Scan0,
-                                    byteCount, byteCount);
-                            }
-                        }
+                        biSize = (uint)Marshal.SizeOf<NativeMethods.BITMAPINFOHEADER>(),
+                        biWidth = width,
+                        biHeight = -height, // negative = top-down
+                        biPlanes = 1,
+                        biBitCount = 32,
+                        biCompression = 0 // BI_RGB
                     }
-                    finally { bmp.UnlockBits(data); }
-                    bmp.Save(localPath, System.Drawing.Imaging.ImageFormat.Png);
-                }
-                else
+                };
+
+                IntPtr hdcScreen = IntPtr.Zero;
+                IntPtr hdcSrc = NativeMethods.CreateCompatibleDC(IntPtr.Zero);
+                IntPtr hdcDst = NativeMethods.CreateCompatibleDC(IntPtr.Zero);
+                IntPtr hDib = NativeMethods.CreateDIBSection(
+                    hdcDst, ref bmi, NativeMethods.DIB_RGB_COLORS,
+                    out IntPtr dibBits, IntPtr.Zero, 0);
+
+                if (hDib == IntPtr.Zero || dibBits == IntPtr.Zero)
                 {
+                    if (hDib != IntPtr.Zero) NativeMethods.DeleteObject(hDib);
+                    NativeMethods.DeleteDC(hdcSrc);
+                    NativeMethods.DeleteDC(hdcDst);
+                    // Fall back to Bitmap.FromHbitmap
                     using var fallback = Bitmap.FromHbitmap(hBitmap);
                     fallback.Save(localPath, System.Drawing.Imaging.ImageFormat.Png);
+                    Logger.Info($"PWA icon cached (fallback) for {aumid} → {localPath}");
+                    return localPath;
                 }
+
+                IntPtr oldSrc = NativeMethods.SelectObject(hdcSrc, hBitmap);
+                IntPtr oldDst = NativeMethods.SelectObject(hdcDst, hDib);
+                NativeMethods.BitBlt(hdcDst, 0, 0, width, height,
+                    hdcSrc, 0, 0, NativeMethods.SRCCOPY);
+                NativeMethods.SelectObject(hdcSrc, oldSrc);
+                NativeMethods.SelectObject(hdcDst, oldDst);
+                NativeMethods.DeleteDC(hdcSrc);
+                NativeMethods.DeleteDC(hdcDst);
+
+                // dibBits now has top-down 32bpp pixels; copy into a Bitmap
+                using var bitmap = new Bitmap(width, height,
+                    System.Drawing.Imaging.PixelFormat.Format32bppPArgb);
+                var rect = new Rectangle(0, 0, width, height);
+                var data = bitmap.LockBits(rect,
+                    System.Drawing.Imaging.ImageLockMode.WriteOnly,
+                    System.Drawing.Imaging.PixelFormat.Format32bppPArgb);
+                try
+                {
+                    int stride = width * 4;
+                    unsafe
+                    {
+                        byte* src = (byte*)dibBits;
+                        byte* dst = (byte*)data.Scan0;
+                        for (int y = 0; y < height; y++)
+                        {
+                            Buffer.MemoryCopy(
+                                src + y * stride,
+                                dst + y * data.Stride,
+                                stride, stride);
+                        }
+                    }
+                }
+                finally { bitmap.UnlockBits(data); }
+
+                NativeMethods.DeleteObject(hDib);
+                bitmap.Save(localPath, System.Drawing.Imaging.ImageFormat.Png);
 
                 Logger.Info($"PWA icon cached for {aumid} → {localPath}");
                 return localPath;

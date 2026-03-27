@@ -1652,7 +1652,7 @@ public partial class LauncherItemsPage : Page
         // -- 5. Name --
         var nameBox = new TextBox
         {
-            PlaceholderText = "Auto-detected",
+            PlaceholderText = "(optional)",
             Margin = new Thickness(0, 0, 0, 8),
             HorizontalAlignment = HorizontalAlignment.Stretch
         };
@@ -1829,12 +1829,14 @@ public partial class LauncherItemsPage : Page
             onReset: () =>
             {
                 customGlyph = null;
+                customColor = "";
                 fetchedIconPath = "";
                 iconPreview.Source = null;
                 iconPreview.Visibility = Visibility.Collapsed;
                 iconGlyphPreview.Visibility = Visibility.Collapsed;
                 iconEmojiPreview.Visibility = Visibility.Collapsed;
                 iconStatus.Text = "Auto-detected";
+                _ = DoFetch(force: true);
             },
             currentGlyph: customGlyph,
             currentColor: customColor,
@@ -1932,7 +1934,7 @@ public partial class LauncherItemsPage : Page
                 await Task.WhenAll(titleTask, iconTask);
                 refreshButton.IsEnabled = true;
                 nameBox.IsEnabled = true;
-                nameBox.PlaceholderText = "Auto-detected";
+                nameBox.PlaceholderText = "(optional)";
 
                 if (force || string.IsNullOrEmpty(nameBox.Text))
                 {
@@ -1963,7 +1965,7 @@ public partial class LauncherItemsPage : Page
                 var appIcon = FaviconService.GetPwaIconFromShell(aumid);
                 refreshButton.IsEnabled = true;
                 nameBox.IsEnabled = true;
-                nameBox.PlaceholderText = "Auto-detected";
+                nameBox.PlaceholderText = "(optional)";
                 if (!string.IsNullOrEmpty(appIcon))
                 {
                     fetchedIconPath = appIcon;
@@ -1990,7 +1992,7 @@ public partial class LauncherItemsPage : Page
                 var appIcon = FaviconService.GetApplicationIcon(path);
                 refreshButton.IsEnabled = true;
                 nameBox.IsEnabled = true;
-                nameBox.PlaceholderText = "Auto-detected";
+                nameBox.PlaceholderText = "(optional)";
                 if (!string.IsNullOrEmpty(appIcon))
                 {
                     fetchedIconPath = appIcon;
@@ -2043,7 +2045,20 @@ public partial class LauncherItemsPage : Page
         }
 
         browseButton.Click += async (s, ev) => await BrowseForApp();
+        bool appDropDownOpen = false;
+        appPathCombo.DropDownOpened += (s, ev) => appDropDownOpen = true;
+        appPathCombo.DropDownClosed += async (s, ev) =>
+        {
+            appDropDownOpen = false;
+            await CommitAppSelection();
+        };
         appPathCombo.SelectionChanged += async (s, ev) =>
+        {
+            // Only commit immediately when dropdown is closed (programmatic / edit-mode population)
+            if (!appDropDownOpen)
+                await CommitAppSelection();
+        };
+        async Task CommitAppSelection()
         {
             if (populating) return;
             if (appPathCombo.SelectedItem is InstalledApp app)
@@ -2056,15 +2071,25 @@ public partial class LauncherItemsPage : Page
                 }
                 populating = true;
                 pathBox.Text = app.ExePath;
-                if (string.IsNullOrEmpty(nameBox.Text))
-                    nameBox.Text = app.DisplayName;
                 populating = false;
                 ScheduleFetch();
             }
-        };
+        }
 
         // -- PWA combo selection --
+        bool pwaDropDownOpen = false;
+        pwaCombo.DropDownOpened += (s, ev) => pwaDropDownOpen = true;
+        pwaCombo.DropDownClosed += async (s, ev) =>
+        {
+            pwaDropDownOpen = false;
+            await CommitPwaSelection();
+        };
         pwaCombo.SelectionChanged += async (s, ev) =>
+        {
+            if (!pwaDropDownOpen)
+                await CommitPwaSelection();
+        };
+        async Task CommitPwaSelection()
         {
             if (populating) return;
             if (pwaCombo.SelectedItem is InstalledPwa pwa)
@@ -2072,8 +2097,6 @@ public partial class LauncherItemsPage : Page
                 populating = true;
                 pathBox.Text = pwa.Aumid;
                 argsBox.Text = "";
-                if (string.IsNullOrEmpty(nameBox.Text))
-                    nameBox.Text = pwa.DisplayName;
                 populating = false;
 
                 // Extract icon from Windows shell registration (preferred), fall back to web favicon
@@ -2182,13 +2205,18 @@ public partial class LauncherItemsPage : Page
                 if (pwaCombo.SelectedIndex < 0)
                     missing.Add("PWA selection");
             }
-            else if (string.IsNullOrWhiteSpace(pathBox.Text))
+            else if (isWebsite)
             {
-                missing.Add(isWebsite ? "URL" : "Path");
+                if (string.IsNullOrWhiteSpace(pathBox.Text))
+                    missing.Add("URL");
             }
-            if (string.IsNullOrWhiteSpace(nameBox.Text))
-                missing.Add("Name");
-
+            else
+            {
+                // Application mode: accept either a combo selection or a typed path
+                bool hasAppSelection = appPathCombo.SelectedItem is InstalledApp sel && sel.ExePath != "__browse__";
+                if (!hasAppSelection && string.IsNullOrWhiteSpace(pathBox.Text))
+                    missing.Add("Path");
+            }
             if (missing.Count > 0)
             {
                 validationHint.Text = $"{string.Join(" and ", missing)} {(missing.Count == 1 ? "is" : "are")} required.";
@@ -2204,6 +2232,7 @@ public partial class LauncherItemsPage : Page
 
         pathBox.TextChanged += (s, ev) => ValidateForm();
         nameBox.TextChanged += (s, ev) => ValidateForm();
+        appPathCombo.SelectionChanged += (s, ev) => ValidateForm();
         pwaCombo.SelectionChanged += (s, ev) => ValidateForm();
         ValidateForm();
 
@@ -2211,8 +2240,27 @@ public partial class LauncherItemsPage : Page
         debounceTimer?.Stop();
         if (result != ContentDialogResult.Primary) return;
 
-        var name = nameBox.Text.Trim();
         var finalPath = pathBox.Text.Trim();
+        // If the path box is empty but the app combo has a selection, use that
+        if (string.IsNullOrEmpty(finalPath) && !isWebsite && !isPwa
+            && appPathCombo.SelectedItem is InstalledApp selectedApp && selectedApp.ExePath != "__browse__")
+        {
+            finalPath = selectedApp.ExePath;
+        }
+        var name = nameBox.Text.Trim();
+        if (string.IsNullOrEmpty(name))
+        {
+            if (!isWebsite && !isPwa && appPathCombo.SelectedItem is InstalledApp comboApp && comboApp.ExePath != "__browse__")
+                name = comboApp.DisplayName;
+            else if (isWebsite)
+                name = await FaviconService.FetchWebsiteTitleAsync(finalPath) ?? finalPath;
+            else if (isPwa)
+                name = finalPath;
+            else if (finalPath.StartsWith(@"shell:AppsFolder\", StringComparison.OrdinalIgnoreCase))
+                name = Path.GetFileNameWithoutExtension(finalPath);
+            else
+                name = FaviconService.GetApplicationName(finalPath) ?? Path.GetFileNameWithoutExtension(finalPath);
+        }
         var args = argsBox.Text.Trim();
         var glyph = customGlyph ?? (isWebsite || isPwa ? "\uE774" : "\uE8E5");
 
@@ -2758,17 +2806,25 @@ public partial class LauncherItemsPage : Page
                     var pwaPattern = new System.Text.RegularExpressions.Regex(
                         @"^[\w][\w.-]*\.[a-zA-Z]{2,}-[A-Fa-f0-9]+_[a-z0-9]+!App$");
 
+                    // Build a set of display names already found via Start Menu / Registry
+                    // so we don't duplicate them with shell:AppsFolder entries.
+                    var existingNames = new HashSet<string>(
+                        apps.Values.Select(a => a.DisplayName),
+                        StringComparer.OrdinalIgnoreCase);
+
                     foreach (dynamic item in folder.Items())
                     {
                         string? path = item.Path as string;
                         string? name = item.Name as string;
                         if (string.IsNullOrEmpty(path) || string.IsNullOrEmpty(name)) continue;
-                        if (!path.Contains('!')) continue;
 
                         // Skip Chromium PWAs (handled by the PWA picker)
                         if (pwaPattern.IsMatch(path)) continue;
 
                         if (IsNonAppName(name)) continue;
+
+                        // Skip if already discovered via Start Menu / Registry
+                        if (existingNames.Contains(name)) continue;
 
                         string launchPath = $"shell:AppsFolder\\{path}";
                         if (!apps.ContainsKey(launchPath))

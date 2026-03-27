@@ -317,6 +317,34 @@ public static class NativeMethods
     [DllImport("gdi32.dll", EntryPoint = "GetObject")]
     internal static extern int GetObjectDibSection(IntPtr hgdiobj, int cbBuffer, out DIBSECTION lpvObject);
 
+    [DllImport("gdi32.dll")]
+    internal static extern IntPtr CreateCompatibleDC(IntPtr hdc);
+
+    [DllImport("gdi32.dll")]
+    internal static extern IntPtr SelectObject(IntPtr hdc, IntPtr hgdiobj);
+
+    [DllImport("gdi32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool DeleteDC(IntPtr hdc);
+
+    [DllImport("gdi32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool BitBlt(IntPtr hdcDest, int nXDest, int nYDest, int nWidth, int nHeight,
+        IntPtr hdcSrc, int nXSrc, int nYSrc, uint dwRop);
+    internal const uint SRCCOPY = 0x00CC0020;
+
+    [DllImport("gdi32.dll")]
+    internal static extern IntPtr CreateDIBSection(IntPtr hdc, ref BITMAPINFO pbmi,
+        uint iUsage, out IntPtr ppvBits, IntPtr hSection, uint dwOffset);
+    internal const uint DIB_RGB_COLORS = 0;
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct BITMAPINFO
+    {
+        public BITMAPINFOHEADER bmiHeader;
+        // No color table needed for 32bpp
+    }
+
     #endregion
 
     #region kernel32.dll
