@@ -239,6 +239,7 @@ public partial class FlyoutWindow : Window
         hash.Add(item.Path);
         hash.Add(item.IconPath);
         hash.Add(item.IconGlyph);
+        hash.Add(item.IconColor);
         hash.Add(item.IsWebsite);
         hash.Add(item.OpenInAppWindow);
         hash.Add(item.AppWindowBrowser);
@@ -373,7 +374,7 @@ public partial class FlyoutWindow : Window
                 HorizontalAlignment = HorizontalAlignment.Center,
             };
         }
-        else
+        else if (Classes.IconGallery.IsFluentGlyph(item.IconGlyph))
         {
             iconElement = new FontIcon
             {
@@ -381,6 +382,21 @@ public partial class FlyoutWindow : Window
                 FontSize = IconSize - 4,
                 HorizontalAlignment = HorizontalAlignment.Center,
             };
+            if (ParseIconColor(item.IconColor) is SolidColorBrush brush1)
+                ((FontIcon)iconElement).Foreground = brush1;
+        }
+        else
+        {
+            iconElement = new TextBlock
+            {
+                Text = item.IconGlyph,
+                FontSize = IconSize - 4,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center,
+                TextAlignment = TextAlignment.Center,
+            };
+            if (ParseIconColor(item.IconColor) is SolidColorBrush brush2)
+                ((TextBlock)iconElement).Foreground = brush2;
         }
 
         var nameText = new TextBlock
@@ -520,6 +536,25 @@ public partial class FlyoutWindow : Window
 
     /// <summary>Invalidates all launcher flyout instances.</summary>
     internal static void InvalidateAllItems() => InvalidateItems(null);
+
+    /// <summary>Parses a hex color string to a SolidColorBrush, or null if empty/invalid.</summary>
+    private static SolidColorBrush? ParseIconColor(string? hex)
+    {
+        if (string.IsNullOrEmpty(hex)) return null;
+        hex = hex.TrimStart('#');
+        try
+        {
+            if (hex.Length == 6)
+            {
+                byte r = Convert.ToByte(hex[..2], 16);
+                byte g = Convert.ToByte(hex[2..4], 16);
+                byte b = Convert.ToByte(hex[4..6], 16);
+                return new SolidColorBrush(global::Windows.UI.Color.FromArgb(255, r, g, b));
+            }
+        }
+        catch { /* fall through */ }
+        return null;
+    }
 
 
 

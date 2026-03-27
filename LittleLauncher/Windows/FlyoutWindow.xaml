@@ -12,6 +12,8 @@
         <Grid.Resources>
             <local:IconPathToImageConverter x:Key="IconPathToImage" />
             <local:IconPathToVisibilityConverter x:Key="IconPathToVisibility" />
+            <local:IsFluentGlyphConverter x:Key="IsFluentGlyph" />
+            <local:IconColorToBrushConverter x:Key="IconColorToBrush" />
 
             <local:FlyoutItemTemplateSelector
                 x:Key="ItemTemplateSelector"
@@ -140,13 +142,25 @@
                         Width="20" Height="20"
                         VerticalAlignment="Center" />
 
-                    <!-- Font icon glyph (shown when no IconPath) -->
-                    <FontIcon
-                        Grid.Column="0"
-                        Glyph="{Binding IconGlyph}"
-                        Visibility="{Binding IconPath, Converter={StaticResource IconPathToVisibility}, ConverterParameter=invert}"
-                        FontSize="18"
-                        VerticalAlignment="Center" />
+                    <!-- Glyph fallback (shown when no IconPath) -->
+                    <Grid Grid.Column="0"
+                          Visibility="{Binding IconPath, Converter={StaticResource IconPathToVisibility}, ConverterParameter=invert}">
+                        <!-- Segoe Fluent Icons glyph -->
+                        <FontIcon
+                            Glyph="{Binding IconGlyph}"
+                            Visibility="{Binding IconGlyph, Converter={StaticResource IsFluentGlyph}}"
+                            Foreground="{Binding IconColor, Converter={StaticResource IconColorToBrush}}"
+                            FontSize="18"
+                            VerticalAlignment="Center" />
+                        <!-- Emoji glyph -->
+                        <TextBlock
+                            Text="{Binding IconGlyph}"
+                            Visibility="{Binding IconGlyph, Converter={StaticResource IsFluentGlyph}, ConverterParameter=invert}"
+                            Foreground="{Binding IconColor, Converter={StaticResource IconColorToBrush}}"
+                            FontSize="18"
+                            VerticalAlignment="Center"
+                            HorizontalAlignment="Center" />
+                    </Grid>
 
                     <TextBlock
                         Grid.Column="1"

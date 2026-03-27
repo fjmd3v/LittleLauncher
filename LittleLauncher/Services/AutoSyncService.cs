@@ -91,6 +91,23 @@ public static class AutoSyncService
     }
 
     /// <summary>
+    /// Cancel any pending debounce and upload immediately (fire-and-forget).
+    /// Call when the user is about to leave (e.g. settings window close) to
+    /// ensure changes reach the server before the app might be killed.
+    /// </summary>
+    public static void FlushPendingUpload()
+    {
+        _debounceTimer?.Dispose();
+        _debounceTimer = null;
+
+        if (!SettingsManager.Current.SftpAutoSync
+            || string.IsNullOrWhiteSpace(SettingsManager.Current.SftpHost))
+            return;
+
+        _ = UploadAndPushSharedAsync("settings close flush");
+    }
+
+    /// <summary>
     /// Run the startup sync: download launchers from the server, then sync shared launchers.
     /// </summary>
     public static async Task SyncOnStartupAsync()
@@ -101,7 +118,7 @@ public static class AutoSyncService
 
         try
         {
-            var (success, message) = await SftpSyncService.DownloadLaunchersAsync();
+            var (success, message) = await SftpSyncService.DownloadLaunchersAsync(isStartupSync: true);
             if (success)
             {
                 Logger.Info("Auto-sync startup: downloaded launchers");

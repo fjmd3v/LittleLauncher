@@ -1,6 +1,6 @@
 ---
 description: "Use when working with app icons, tray icons, shortcut icons, or window icons. Covers which icon files exist, where each icon surface pulls from, and how to update them correctly."
-applyTo: "**/MainWindow.xaml.cs,**/SettingsWindow.xaml.cs,**/LaunchersPage.xaml*,**/LauncherShortcut/**,**/HomePage.xaml.cs,**/FlyoutConverters.cs,**/FlyoutWindow.xaml*"
+applyTo: "**/MainWindow.xaml.cs,**/SettingsWindow.xaml.cs,**/LaunchersPage.xaml*,**/LauncherShortcut/**,**/HomePage.xaml.cs,**/FlyoutConverters.cs,**/FlyoutWindow.xaml*,**/IconGallery.cs"
 ---
 
 # Icon System
@@ -53,9 +53,12 @@ Little Launcher uses a flat upright rocket as its identity icon. The **app ident
 | `"Search"` | Search glyph | Segoe Fluent Icons `\uE721` |
 | `"Globe"` | Globe glyph | Segoe Fluent Icons `\uE774` |
 | `"Custom"` | Custom | User-provided file |
+| `"Glyph:X"` | Gallery glyph/emoji | Arbitrary Fluent icon or emoji from the icon gallery |
+| `"Glyph:#RRGGBB:X"` | Colored gallery glyph/emoji | Gallery glyph with a custom color |
 
 Preset icons are full-color PNGs — they do **not** change with OS theme.
 Glyph presets render in black (light theme) or white (dark theme) and update automatically on theme change.
+Gallery-chosen glyphs (stored as `"Glyph:X"` or `"Glyph:#RRGGBB:X"`) are resolved by `ResolveBaseIconBitmap()` using `TrayIconModes.IsGlyphMode()`, `GetGlyphCharacter()`, and `GetGlyphColor()`, then rendered via `RenderGlyphBitmap()` with "Segoe Fluent Icons" or "Segoe UI Emoji" font depending on `IconGallery.IsFluentGlyph()`. When a color is encoded, it overrides the theme-dependent black/white.
 
 ## How Icon Updates Flow
 
@@ -73,8 +76,8 @@ All icon surfaces derive from a single source of truth: `ResolveBaseIconBitmap(L
 
 | Method | Purpose |
 |---|---|
-| `ResolveBaseIconBitmap(Launcher)` | Single source of truth — returns 256×256 bitmap for a launcher's `TrayIconMode` |
-| `RenderGlyphBitmap()` | Renders a Segoe Fluent Icons glyph to bitmap at specified size (called by `ResolveBaseIconBitmap` for glyph modes and composite sub-icons) |
+| `ResolveBaseIconBitmap(Launcher)` | Single source of truth — returns 256×256 bitmap for a launcher's `TrayIconMode`. Handles Composite, Custom, named glyph presets, `Glyph:` gallery modes, and color presets (with fallback to Blue) |
+| `RenderGlyphBitmap()` | Renders a Segoe Fluent Icons or Segoe UI Emoji glyph to bitmap at specified size. Accepts optional `fontName` parameter (called by `ResolveBaseIconBitmap` for glyph modes and composite sub-icons) |
 | `RenderCompositeIconBitmap()` | Renders a 2×2 grid composite from first 4 launchable items (`"Composite"` mode) |
 | `CollectLaunchableItems()` | Collects first N launchable items from a launcher, flattening groups, skipping headings/column breaks |
 | `RoundedRectPath()` | Creates a `GraphicsPath` for a rounded rectangle (used by composite background) |
@@ -140,6 +143,8 @@ After any bulk icon change, call `FlyoutWindow.InvalidateItems()` so the flyout 
 
 - **MSIX VFS redirection** — see the [dedicated section below](#msix-vfs-redirection). All file paths referenced by external processes (shell `.lnk` files, companion exe) **must** use the physical path from `MainWindow.GetPhysicalAppDataDir()`, never raw `Environment.GetFolderPath(ApplicationData)`. The latter is VFS-redirected inside MSIX and invisible to the shell.
 - **`LauncherItem.IconGlyph` must be a Unicode character**, not a text name. Use `"\uE774"` (globe) for websites and `"\uE8E5"` (open) for apps. Text strings like `"Globe24"` render as rectangle tofu in `FontIcon`.
+- **`LauncherItem.IconGlyph` can be an emoji character** (e.g. `"🚀"`, `"💻"`). Use `IconGallery.IsFluentGlyph()` to determine whether a glyph is a Segoe Fluent icon (PUA range U+E000–U+F8FF) or an emoji. Fluent glyphs render via `FontIcon`; emojis render via `TextBlock`. The `IsFluentGlyphConverter` XAML converter handles this in data templates. In `System.Drawing` code (composite tray icon), use `"Segoe UI Emoji"` font for emoji glyphs instead of `"Segoe Fluent Icons"`.
+- **Icon Gallery** (`Classes/IconGallery.cs`) provides a gallery-style Flyout for choosing glyphs, emojis, app color icons, or custom images. It is shown from the item edit dialog via a "Choose" button and from the launcher icon chooser. The gallery has tabs (Glyphs, Emoji, App Icons) plus a color palette for choosing glyph colors. Selected colors are returned in `IconResult.Color` and stored as `LauncherItem.IconColor` (hex string) or encoded in the launcher `TrayIconMode` string (`"Glyph:#RRGGBB:X"`).
 - The bundled `.ico` is the Blue rocket only — it's the exe identity icon and fallback.
 - `SaveResolvedIconToAppData()` always writes an `.ico` for all modes (including mode 0). There is no "delete and fall back to exe icon" path.
 - The companion exe (`LauncherShortcut/Program.cs`) loads `app-icon.ico` from `AppContext.BaseDirectory` for the pin dialog via `LoadImage` + `WM_SETICON`.

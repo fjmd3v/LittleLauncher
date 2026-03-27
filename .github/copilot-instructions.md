@@ -10,7 +10,7 @@ Little Launcher is a .NET 10 WinUI 3 desktop application (unpackaged) that provi
 - **Launchers** — users define one or more named `Launcher` objects (model: `LittleLauncher.Models.Launcher`). Each launcher has its own `Items` collection, tray icon (mode + optional custom path), and `NIconHide` visibility flag. Settings include a `Launchers: ObservableCollection<Launcher>`. On first run with old settings, the legacy `LauncherItems` list is migrated into a "Default" launcher.
 - **MainWindow** is invisible (moved off-screen, 1×1). It owns one native tray icon per launcher via `Shell_NotifyIcon` (stored in `_trayIcons: Dictionary<string, TrayIconEntry>`). Uses `WS_EX_TOOLWINDOW` to hide from Alt-Tab.
 - **FlyoutWindow** is a popup that displays launcher items. Supports two view modes per launcher: list view (icon + name side by side) and icon grid view (larger icon with name below, 3-per-row wrapping grid). One instance is maintained per launcher (`_instances: Dictionary<string, FlyoutWindow>`). Shown from a launcher's tray icon click, positioned above the taskbar, dismissed on focus loss or Escape.
-- **SettingsWindow** is a WinUI 3 window with `MicaBackdrop`. It uses `NavigationView` with page-based navigation (Home, Launchers, Cloud Sync, Settings, About). The Launchers page has a drill-in to LauncherItemsPage via `SettingsWindow.NavigateToLauncherItems(Launcher)`.
+- **SettingsWindow** is a WinUI 3 window with `MicaBackdrop`. It uses `NavigationView` with page-based navigation (Home, Launchers, Cloud Sync, Settings, About). The Launchers page shows launcher cards with Settings (opens a `ContentDialog`) and Items (drill-in to `LauncherItemsPage`) buttons. Creating a new launcher auto-opens the settings dialog.
 - **Settings** are serialised to `%AppData%\LittleLauncher\settings.json` via `System.Text.Json`, managed by the fully static `SettingsManager`. On first load, migrates from legacy `settings.xml` (XmlSerializer) to JSON.
 - **SftpSyncService** uses SSH.NET for async upload/download of all launchers (as `launchers.json`) to a configurable remote server. Also handles per-launcher shared sync: supports 1-way (owner pushes, subscribers pull) and 2-way (all participants push and pull, last save wins) modes via separate SFTP connections.
 - **LauncherShortcut** (`LittleLauncherFlyout.exe`) is a companion exe pinned to the taskbar. It signals the main app via `PostMessage` with a launcher-specific message (`LittleLauncher_ShowFlyout_{launcherId}`) then exits. Accepts `--launcher {guid}` argument (also supports legacy `--layout` for backward compat). Release builds are Native AOT for instant startup — see the performance warning in `ARCHITECTURE.md`.
@@ -20,7 +20,7 @@ Little Launcher is a .NET 10 WinUI 3 desktop application (unpackaged) that provi
 | Namespace | Contents |
 |---|---|
 | `LittleLauncher` | App, MainWindow, SettingsWindow |
-| `LittleLauncher.Classes` | NativeMethods, ThemeManager |
+| `LittleLauncher.Classes` | NativeMethods, ThemeManager, IconGallery |
 | `LittleLauncher.Classes.Settings` | SettingsManager |
 | `LittleLauncher.Models` | LauncherItem, Launcher, SshConnectionProfile |
 | `LittleLauncher.Pages` | All settings pages |
@@ -70,6 +70,7 @@ Release builds AOT-publish the companion exe (`LauncherShortcut`) automatically.
 - **Add a new settings page:** Create `Pages/FooPage.xaml` + `.cs`, add a `NavigationViewItem` in `SettingsWindow.xaml`, add any new string keys to `Dictionary-en-US.xaml`.
 - **Add a new launcher feature:** Extend `LauncherItem` model, update `FlyoutWindow` to render it, update `LauncherItemsPage` for editing.
 - **Add a new setting:** Add an `[ObservableProperty]` to `UserSettings.cs`. It will auto-serialize to JSON.
+- **Add/extend icon gallery tabs:** Edit `Classes/IconGallery.cs` — add entries to `FluentIconCategories` or `EmojiCategories` arrays. The gallery supports Segoe Fluent Icons (PUA glyphs), emojis, and app color icons. Icon selection uses a pending-selection model with Confirm/Cancel buttons. Selected icons get an accent border. Color swatches override `ButtonBackgroundPointerOver`/`ButtonBackgroundPressed` to keep their color on hover.
 
 ## Launcher item types
 
@@ -86,7 +87,7 @@ Groups have a `Children` (`ObservableCollection<LauncherItem>`) that holds neste
 
 Column breaks (`IsColumnBreak = true`) are structural dividers stored as sentinel items in the flat `Items` list. They cause both the flyout and the settings page to render items in side-by-side columns. In the settings page, `RebuildColumns()` splits the flat list at column break sentinels into per-column `ListView` controls (fixed 280px wide) within a dynamic `Grid` (`ColumnsPanel`). Column breaks are not displayed as inline items — they are invisible. Users add/remove columns via "Add Column" / "Remove Column" buttons. Changes sync back to the flat list via `SyncColumnsToFlatList()`. Created via `LauncherItem.CreateColumnBreak()`.
 
-Item and group cards show a single `...` context menu button (hidden via `Opacity=0` / `IsHitTestVisible=false`, revealed on hover) that opens a `MenuFlyout` with Move up/down, Move to…, Edit, and Remove actions.
+Item and group cards show a single `...` context menu button (hidden via `Opacity=0` / `IsHitTestVisible=false`, revealed on hover) that opens a `MenuFlyout` with Move up/down, Move to… (groups and other launchers), Edit, and Remove actions. The Move to… submenu lists available groups within the current launcher, plus all other launchers for cross-launcher moves.
 
 PWAs are auto-detected by enumerating `shell:AppsFolder` for Chromium-registered app entries (AUMIDs matching `{domain}-{HEX}_{hash}!App`). Icons are fetched from the PWA domain via `FaviconService.FetchAndCacheAsync()`.
 - **Release a new version:** Edit `<Version>` in `Directory.Build.props`, update fallback version in `Package.wxs`, commit, tag `vX.Y.Z`, push. The MSIX manifest version is auto-stamped by `LittleLauncherMSIX/build-msix.ps1`. See `versioning.instructions.md` for the full checklist.

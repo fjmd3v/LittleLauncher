@@ -42,6 +42,13 @@ public partial class LauncherItem : ObservableObject
     public partial string IconPath { get; set; }
 
     /// <summary>
+    /// Optional hex color for the icon glyph (e.g. "#FF0000"). Empty means use the default theme color.
+    /// Only applies when IconGlyph is displayed (no effect when IconPath image is used).
+    /// </summary>
+    [ObservableProperty]
+    public partial string IconColor { get; set; }
+
+    /// <summary>
     /// Whether this is a website (true) or a local application (false).
     /// </summary>
     [ObservableProperty]
@@ -106,6 +113,7 @@ public partial class LauncherItem : ObservableObject
         Arguments = string.Empty;
         IconGlyph = "\uE8E5";
         IconPath = string.Empty;
+        IconColor = string.Empty;
         IsWebsite = false;
         OpenInAppWindow = false;
         AppWindowBrowser = string.Empty;
@@ -122,6 +130,7 @@ public partial class LauncherItem : ObservableObject
         Arguments = arguments;
         IconGlyph = iconGlyph;
         IconPath = iconPath;
+        IconColor = string.Empty;
         IsWebsite = isWebsite;
         OpenInAppWindow = openInAppWindow;
         AppWindowBrowser = string.Empty;

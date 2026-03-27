@@ -88,8 +88,13 @@ public static class SftpSyncService
     /// <summary>
     /// Download all launchers from the remote SFTP server and replace current launchers.
     /// Falls back to legacy launcher-items.xml if launchers.json doesn't exist.
+    /// When called during auto-sync startup, compares remote timestamp with local
+    /// settings file to avoid overwriting newer local data.
     /// </summary>
-    public static async Task<(bool Success, string Message)> DownloadLaunchersAsync(string? password = null)
+    /// <param name="password">Optional SSH key passphrase.</param>
+    /// <param name="isStartupSync">When true, skip download if local settings are newer than the remote timestamp.</param>
+    public static async Task<(bool Success, string Message)> DownloadLaunchersAsync(
+        string? password = null, bool isStartupSync = false)
     {
         try
         {
@@ -111,9 +116,28 @@ public static class SftpSyncService
 
             client.Disconnect();
 
-            var launchers = DeserializeLaunchers(stream);
+            var (launchers, remoteTimestamp) = DeserializeLaunchers(stream);
             if (launchers == null)
                 return (false, "Failed to parse launchers from server.");
+
+            // If this is a startup sync and we have a remote timestamp,
+            // compare with local settings file to avoid overwriting newer local changes.
+            if (isStartupSync && remoteTimestamp.HasValue)
+            {
+                var localSettingsPath = Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                    "LittleLauncher", "settings.json");
+                if (File.Exists(localSettingsPath))
+                {
+                    var localModified = File.GetLastWriteTimeUtc(localSettingsPath);
+                    if (localModified > remoteTimestamp.Value.UtcDateTime)
+                    {
+                        Logger.Info($"Startup sync skipped: local settings ({localModified:u}) " +
+                                    $"are newer than remote ({remoteTimestamp.Value.UtcDateTime:u})");
+                        return (false, "Local settings are newer than server; skipped download.");
+                    }
+                }
+            }
 
             await ApplyLaunchersAsync(launchers);
 
@@ -646,29 +670,57 @@ public static class SftpSyncService
     }
 
     /// <summary>
-    /// Serialize launchers to a MemoryStream as JSON.
+    /// Envelope for the remote launchers.json file. Includes a UTC timestamp
+    /// so startup downloads can skip overwriting newer local data.
+    /// </summary>
+    private sealed class LaunchersEnvelope
+    {
+        public DateTimeOffset LastModified { get; set; }
+        public List<Launcher> Launchers { get; set; } = [];
+    }
+
+    /// <summary>
+    /// Serialize launchers to a MemoryStream as JSON, wrapped in a timestamped envelope.
     /// </summary>
     private static MemoryStream SerializeLaunchers(ObservableCollection<Launcher> launchers)
     {
-        var list = new List<Launcher>(launchers);
+        var envelope = new LaunchersEnvelope
+        {
+            LastModified = DateTimeOffset.UtcNow,
+            Launchers = new List<Launcher>(launchers)
+        };
         var stream = new MemoryStream();
-        JsonSerializer.Serialize(stream, list, JsonOptions);
+        JsonSerializer.Serialize(stream, envelope, JsonOptions);
         stream.Position = 0;
         return stream;
     }
 
     /// <summary>
     /// Deserialize launchers from a JSON stream.
+    /// Supports both the new envelope format and the legacy plain array format.
+    /// Returns the launcher list and an optional timestamp (null for legacy data).
     /// </summary>
-    private static List<Launcher>? DeserializeLaunchers(MemoryStream stream)
+    private static (List<Launcher>? Launchers, DateTimeOffset? LastModified) DeserializeLaunchers(MemoryStream stream)
     {
         try
         {
-            return JsonSerializer.Deserialize<List<Launcher>>(stream, JsonOptions);
+            // Try envelope format first
+            var envelope = JsonSerializer.Deserialize<LaunchersEnvelope>(stream, JsonOptions);
+            if (envelope?.Launchers != null && envelope.Launchers.Count > 0)
+                return (envelope.Launchers, envelope.LastModified);
+        }
+        catch { }
+
+        // Fall back to legacy plain array
+        stream.Position = 0;
+        try
+        {
+            var list = JsonSerializer.Deserialize<List<Launcher>>(stream, JsonOptions);
+            return (list, null);
         }
         catch
         {
-            return null;
+            return (null, null);
         }
     }
 

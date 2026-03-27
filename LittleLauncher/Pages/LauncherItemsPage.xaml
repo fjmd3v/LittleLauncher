@@ -7,6 +7,8 @@
     <Page.Resources>
         <win:IconPathToImageConverter x:Key="IconPathToImage" />
         <win:IconPathToVisibilityConverter x:Key="IconPathToVisibility" />
+        <win:IsFluentGlyphConverter x:Key="IsFluentGlyph" />
+        <win:IconColorToBrushConverter x:Key="IconColorToBrush" />
 
         <!-- Template for regular launcher items -->
         <DataTemplate x:Key="LauncherItemTemplate">
@@ -28,9 +30,16 @@
                         <Image Source="{Binding IconPath, Converter={StaticResource IconPathToImage}}"
                                Visibility="{Binding IconPath, Converter={StaticResource IconPathToVisibility}}"
                                Width="24" Height="24" />
-                        <FontIcon Glyph="{Binding IconGlyph}"
-                                  Visibility="{Binding IconPath, Converter={StaticResource IconPathToVisibility}, ConverterParameter=invert}"
-                                  FontSize="20" />
+                        <Grid Visibility="{Binding IconPath, Converter={StaticResource IconPathToVisibility}, ConverterParameter=invert}">
+                            <FontIcon Glyph="{Binding IconGlyph}"
+                                      Visibility="{Binding IconGlyph, Converter={StaticResource IsFluentGlyph}}"
+                                      Foreground="{Binding IconColor, Converter={StaticResource IconColorToBrush}}"
+                                      FontSize="20" />
+                            <TextBlock Text="{Binding IconGlyph}"
+                                       Visibility="{Binding IconGlyph, Converter={StaticResource IsFluentGlyph}, ConverterParameter=invert}"
+                                       Foreground="{Binding IconColor, Converter={StaticResource IconColorToBrush}}"
+                                       FontSize="20" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Grid>
                     </Grid>
                     <TextBlock Grid.Column="2" Text="{Binding Name}" FontWeight="Medium" FontSize="14" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
                     <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center" Spacing="4"
@@ -141,9 +150,16 @@
                         <Image Source="{Binding IconPath, Converter={StaticResource IconPathToImage}}"
                                Visibility="{Binding IconPath, Converter={StaticResource IconPathToVisibility}}"
                                Width="32" Height="32" />
-                        <FontIcon Glyph="{Binding IconGlyph}"
-                                  Visibility="{Binding IconPath, Converter={StaticResource IconPathToVisibility}, ConverterParameter=invert}"
-                                  FontSize="28" />
+                        <Grid Visibility="{Binding IconPath, Converter={StaticResource IconPathToVisibility}, ConverterParameter=invert}">
+                            <FontIcon Glyph="{Binding IconGlyph}"
+                                      Visibility="{Binding IconGlyph, Converter={StaticResource IsFluentGlyph}}"
+                                      Foreground="{Binding IconColor, Converter={StaticResource IconColorToBrush}}"
+                                      FontSize="28" />
+                            <TextBlock Text="{Binding IconGlyph}"
+                                       Visibility="{Binding IconGlyph, Converter={StaticResource IsFluentGlyph}, ConverterParameter=invert}"
+                                       Foreground="{Binding IconColor, Converter={StaticResource IconColorToBrush}}"
+                                       FontSize="28" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Grid>
                     </Grid>
                     <!-- Name -->
                     <TextBlock Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="3"
@@ -278,7 +294,7 @@
         and its internal ItemsStackPanel can virtualize — without this the ListView renders
         every container at once, causing scrolling choppiness with large lists.
     -->
-    <Grid x:Name="RootGrid" Margin="16" MaxWidth="1000" HorizontalAlignment="Stretch">
+    <Grid x:Name="RootGrid" Margin="16" HorizontalAlignment="Center">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>

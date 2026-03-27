@@ -450,6 +450,24 @@ public sealed partial class MainWindow : Window
                 return RenderGlyphBitmap(preset.Glyph, fg);
             }
 
+            // Gallery-chosen glyph/emoji (stored as "Glyph:X" or "Glyph:#RRGGBB:X" in TrayIconMode)
+            if (TrayIconModes.IsGlyphMode(mode))
+            {
+                string? glyphStr = TrayIconModes.GetGlyphCharacter(mode);
+                if (!string.IsNullOrEmpty(glyphStr) && glyphStr.Length > 0)
+                {
+                    bool dark = ThemeManager.IsDarkTheme();
+                    string? colorHex = TrayIconModes.GetGlyphColor(mode);
+                    var fg = !string.IsNullOrEmpty(colorHex)
+                        ? ParseHexColor(colorHex, dark ? System.Drawing.Color.White : System.Drawing.Color.Black)
+                        : (dark ? System.Drawing.Color.White : System.Drawing.Color.Black);
+                    string fontName = Classes.IconGallery.IsFluentGlyph(glyphStr)
+                        ? "Segoe Fluent Icons"
+                        : "Segoe UI Emoji";
+                    return RenderGlyphBitmap(glyphStr[0], fg, 256, 240f, fontName);
+                }
+            }
+
             // Color presets (fallback to Blue if unknown)
             if (!PresetIcons.TryGetValue(mode, out var name))
                 name = PresetIcons[TrayIconModes.Blue];
@@ -475,10 +493,28 @@ public sealed partial class MainWindow : Window
         return RenderGlyphBitmap(glyph, fg, 256, 240f);
     }
 
+    /// <summary>Parses "#RRGGBB" to a System.Drawing.Color, returning fallback on failure.</summary>
+    private static System.Drawing.Color ParseHexColor(string hex, System.Drawing.Color fallback)
+    {
+        try
+        {
+            hex = hex.TrimStart('#');
+            if (hex.Length == 6)
+            {
+                int r = Convert.ToByte(hex[..2], 16);
+                int g = Convert.ToByte(hex[2..4], 16);
+                int b = Convert.ToByte(hex[4..6], 16);
+                return System.Drawing.Color.FromArgb(255, r, g, b);
+            }
+        }
+        catch { /* fall through */ }
+        return fallback;
+    }
+
     /// <summary>
     /// Renders a Segoe Fluent Icons glyph at a specified size.
     /// </summary>
-    private static System.Drawing.Bitmap RenderGlyphBitmap(char glyph, System.Drawing.Color fg, int size, float fontPx)
+    private static System.Drawing.Bitmap RenderGlyphBitmap(char glyph, System.Drawing.Color fg, int size, float fontPx, string fontName = "Segoe Fluent Icons")
     {
         var bitmap = new System.Drawing.Bitmap(size, size, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
         using (var g = System.Drawing.Graphics.FromImage(bitmap))
@@ -487,7 +523,7 @@ public sealed partial class MainWindow : Window
             g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.HighQuality;
             g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAliasGridFit;
 
-            using var font = new System.Drawing.Font("Segoe Fluent Icons", fontPx, System.Drawing.GraphicsUnit.Pixel);
+            using var font = new System.Drawing.Font(fontName, fontPx, System.Drawing.GraphicsUnit.Pixel);
             using var brush = new System.Drawing.SolidBrush(fg);
             using var fmt = new System.Drawing.StringFormat(System.Drawing.StringFormat.GenericTypographic);
             fmt.Alignment = System.Drawing.StringAlignment.Center;
@@ -555,8 +591,13 @@ public sealed partial class MainWindow : Window
                 }
                 else if (!string.IsNullOrEmpty(item.IconGlyph) && item.IconGlyph.Length > 0)
                 {
-                    var fg = dark ? System.Drawing.Color.White : System.Drawing.Color.Black;
-                    subIcon = RenderGlyphBitmap(item.IconGlyph[0], fg, cellSize, cellSize * 0.8f);
+                    var fg = !string.IsNullOrEmpty(item.IconColor)
+                        ? ParseHexColor(item.IconColor, dark ? System.Drawing.Color.White : System.Drawing.Color.Black)
+                        : (dark ? System.Drawing.Color.White : System.Drawing.Color.Black);
+                    string fontName = Classes.IconGallery.IsFluentGlyph(item.IconGlyph)
+                        ? "Segoe Fluent Icons"
+                        : "Segoe UI Emoji";
+                    subIcon = RenderGlyphBitmap(item.IconGlyph[0], fg, cellSize, cellSize * 0.8f, fontName);
                 }
             }
             catch { /* best-effort */ }

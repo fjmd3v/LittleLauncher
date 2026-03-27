@@ -1,12 +1,14 @@
 // Copyright © 2024-2026 The Little Launcher Authors
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+using LittleLauncher.Classes;
 using LittleLauncher.Classes.Settings;
 using LittleLauncher.Models;
 using LittleLauncher.Services;
 using LittleLauncher.Windows;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Imaging;
 using System;
 using System.IO;
@@ -57,120 +59,6 @@ public sealed partial class LaunchersPage : Page
 
     private Border BuildLauncherCard(Launcher launcher)
     {
-        // ── Name row ────────────────────────────────────────────────
-        var nameBox = new TextBox
-        {
-            PlaceholderText = "Launcher name",
-            Text = launcher.Name,
-            MinWidth = 160,
-            MaxWidth = 280,
-        };
-        nameBox.TextChanged += (s, e) =>
-        {
-            launcher.Name = nameBox.Text;
-        };
-        void commitName()
-        {
-            launcher.Name = nameBox.Text;
-            SettingsManager.SaveSettings();
-            // Update the card header title to reflect the new name
-            if (nameBox.Tag is TextBlock title)
-                title.Text = launcher.Name;
-        }
-        nameBox.KeyDown += (s, e) =>
-        {
-            if (e.Key == global::Windows.System.VirtualKey.Enter)
-            {
-                commitName();
-                e.Handled = true;
-            }
-        };
-        nameBox.LostFocus += (s, e) => commitName();
-
-        var nameRow = new Grid();
-        nameRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        nameRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-
-        var nameLabel = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
-        nameLabel.Children.Add(new TextBlock { Text = "Name", FontSize = 14 });
-        nameLabel.Children.Add(new TextBlock { Text = "Display name in tray icon tooltip", FontSize = 12, Opacity = 0.5 });
-        Grid.SetColumn(nameLabel, 0);
-        Grid.SetColumn(nameBox, 1);
-        nameRow.Children.Add(nameLabel);
-        nameRow.Children.Add(nameBox);
-
-        // ── Icon mode combo ─────────────────────────────────────────
-        var iconCombo = BuildIconModeCombo(launcher);
-
-        var iconRow = new Grid();
-        iconRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        iconRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-
-        var iconLabel = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
-        iconLabel.Children.Add(new TextBlock { Text = "Icon", FontSize = 14 });
-        iconLabel.Children.Add(new TextBlock { Text = "Icon style for this launcher", FontSize = 12, Opacity = 0.5 });
-        Grid.SetColumn(iconLabel, 0);
-        Grid.SetColumn(iconCombo, 1);
-        iconRow.Children.Add(iconLabel);
-        iconRow.Children.Add(iconCombo);
-
-        // ── Custom icon path row (visible only when TrayIconMode == 12) ────
-        var customIconRow = BuildCustomIconRow(launcher);
-        customIconRow.Visibility = launcher.TrayIconMode == TrayIconModes.Custom ? Visibility.Visible : Visibility.Collapsed;
-        iconCombo.SelectionChanged += (s, e) =>
-        {
-            string mode = (iconCombo.SelectedIndex >= 0 && iconCombo.SelectedIndex < IconComboModeMap.Length)
-                ? IconComboModeMap[iconCombo.SelectedIndex] : "";
-            customIconRow.Visibility = mode == TrayIconModes.Custom
-                ? Visibility.Visible : Visibility.Collapsed;
-        };
-
-        // ── Show tray icon toggle ────────────────────────────────────
-        var showToggle = new ToggleSwitch
-        {
-            IsOn = !launcher.NIconHide,
-            OnContent = "",
-            OffContent = "",
-            MinWidth = 0,
-        };
-        showToggle.Toggled += (s, e) =>
-        {
-            launcher.NIconHide = !showToggle.IsOn;
-            SettingsManager.SaveSettings();
-        };
-
-        var hideRow = new Grid();
-        hideRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        hideRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-
-        var hideLabel = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
-        hideLabel.Children.Add(new TextBlock { Text = "Show in Tray", FontSize = 14 });
-        hideLabel.Children.Add(new TextBlock { Text = "Show this launcher's icon in the system tray", FontSize = 12, Opacity = 0.5 });
-        Grid.SetColumn(hideLabel, 0);
-        Grid.SetColumn(showToggle, 1);
-        hideRow.Children.Add(hideLabel);
-        hideRow.Children.Add(showToggle);
-
-        // ── Taskbar icon row (with Pin button inline) ───────────────
-        var pinBtn = new Button
-        {
-            Content = "Pin to Taskbar",
-            Tag = launcher,
-        };
-        pinBtn.Click += PinToTaskbar_Click;
-
-        var taskbarRow = new Grid();
-        taskbarRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        taskbarRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-
-        var taskbarLabel = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
-        taskbarLabel.Children.Add(new TextBlock { Text = "Show in Taskbar", FontSize = 14 });
-        taskbarLabel.Children.Add(new TextBlock { Text = "Pin a shortcut to the taskbar for quick access", FontSize = 12, Opacity = 0.5 });
-        Grid.SetColumn(taskbarLabel, 0);
-        Grid.SetColumn(pinBtn, 1);
-        taskbarRow.Children.Add(taskbarLabel);
-        taskbarRow.Children.Add(pinBtn);
-
         // ── Items row (clickable drill-in with chevron) ─────────────
         int itemCount = CountLauncherItems(launcher.Items);
 
@@ -220,75 +108,52 @@ public sealed partial class LaunchersPage : Page
         };
         deleteBtn.Click += DeleteLauncher_Click;
 
-        // ── View mode combo ──────────────────────────────────────────
-        var viewModeCombo = new ComboBox { MinWidth = 160 };
-        viewModeCombo.Items.Add("Icons");
-        viewModeCombo.Items.Add("List");
-        viewModeCombo.SelectedIndex = Math.Clamp(launcher.ViewMode, 0, 1);
-        viewModeCombo.SelectionChanged += (s, e) =>
+        // ── Settings row (opens settings dialog) ────────────────
+        var settingsLabel = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
+        settingsLabel.Children.Add(new TextBlock { Text = "Settings", FontSize = 14 });
+        settingsLabel.Children.Add(new TextBlock { Text = "Name, icon, view mode, and more", FontSize = 12, Opacity = 0.5 });
+
+        var settingsChevron = new FontIcon
         {
-            launcher.ViewMode = viewModeCombo.SelectedIndex;
-            SettingsManager.SaveSettings();
-            FlyoutWindow.InvalidateItems(launcher.Id);
+            Glyph = "\uE76C",
+            FontSize = 12,
+            Opacity = 0.6,
+            VerticalAlignment = VerticalAlignment.Center,
         };
 
-        var viewModeRow = new Grid();
-        viewModeRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        viewModeRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        var settingsRowInner = new Grid();
+        settingsRowInner.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        settingsRowInner.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        Grid.SetColumn(settingsLabel, 0);
+        Grid.SetColumn(settingsChevron, 1);
+        settingsRowInner.Children.Add(settingsLabel);
+        settingsRowInner.Children.Add(settingsChevron);
 
-        var viewModeLabel = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
-        viewModeLabel.Children.Add(new TextBlock { Text = "View Mode", FontSize = 14 });
-        viewModeLabel.Children.Add(new TextBlock { Text = "How items appear in the flyout popup", FontSize = 12, Opacity = 0.5 });
-        Grid.SetColumn(viewModeLabel, 0);
-        Grid.SetColumn(viewModeCombo, 1);
-        viewModeRow.Children.Add(viewModeLabel);
-        viewModeRow.Children.Add(viewModeCombo);
+        var settingsRow = new Button
+        {
+            Content = settingsRowInner,
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            HorizontalContentAlignment = HorizontalAlignment.Stretch,
+            Padding = new Thickness(12, 10, 12, 10),
+            Background = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["SubtleFillColorTransparentBrush"],
+            BorderThickness = new Thickness(0),
+        };
+        settingsRow.Click += async (s, e) =>
+        {
+            await ShowLauncherSettingsDialog(launcher);
+            RebuildLauncherCards();
+        };
 
         // ── Card container ──────────────────────────────────────────
         var content = new StackPanel { Spacing = 8 };
-        content.Children.Add(nameRow);
-        content.Children.Add(iconRow);
-        content.Children.Add(customIconRow);
-        content.Children.Add(viewModeRow);
-
-        // ── Show title toggle ────────────────────────────────────────
-        var showTitleToggle = new ToggleSwitch
-        {
-            IsOn = launcher.ShowTitle,
-            OnContent = "",
-            OffContent = "",
-            MinWidth = 0,
-        };
-        showTitleToggle.Toggled += (s, e) =>
-        {
-            launcher.ShowTitle = showTitleToggle.IsOn;
-            SettingsManager.SaveSettings();
-            FlyoutWindow.InvalidateItems(launcher.Id);
-        };
-
-        var showTitleRow = new Grid();
-        showTitleRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        showTitleRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-
-        var showTitleLabel = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
-        showTitleLabel.Children.Add(new TextBlock { Text = "Show Title", FontSize = 14 });
-        showTitleLabel.Children.Add(new TextBlock { Text = "Show the launcher name at the top of the flyout", FontSize = 12, Opacity = 0.5 });
-        Grid.SetColumn(showTitleLabel, 0);
-        Grid.SetColumn(showTitleToggle, 1);
-        showTitleRow.Children.Add(showTitleLabel);
-        showTitleRow.Children.Add(showTitleToggle);
-
-        content.Children.Add(showTitleRow);
-        content.Children.Add(hideRow);
-        content.Children.Add(taskbarRow);
+        content.Children.Add(settingsRow);
         content.Children.Add(itemsRow);
 
-        var headerIcon = new FontIcon { Glyph = "\uF0E2", FontSize = 16, Margin = new Thickness(0, 0, 8, 0), VerticalAlignment = VerticalAlignment.Center };
+        var headerIconElement = BuildLauncherHeaderIcon(launcher);
         var headerTitle = new TextBlock { Text = launcher.Name, FontSize = 14, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center };
-        nameBox.Tag = headerTitle; // so commitName() can update the header
 
         var headerLeft = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
-        headerLeft.Children.Add(headerIcon);
+        headerLeft.Children.Add(headerIconElement);
         headerLeft.Children.Add(headerTitle);
 
         // ── Shared badge ────────────────────────────────────────────
@@ -449,73 +314,192 @@ public sealed partial class LaunchersPage : Page
         return card;
     }
 
-    // Maps combo box index → TrayIconMode string constant.
-    // Composite is first so it's the most visible option.
-    private static readonly string[] IconComboModeMap = [
-        TrayIconModes.Composite,
-        TrayIconModes.Blue, TrayIconModes.Green, TrayIconModes.Teal,
-        TrayIconModes.Red, TrayIconModes.Orange, TrayIconModes.Purple,
-        TrayIconModes.Pin, TrayIconModes.Star, TrayIconModes.Heart,
-        TrayIconModes.Lightning, TrayIconModes.Search, TrayIconModes.Globe,
-        TrayIconModes.Custom,
-    ];
-
-    private static ComboBox BuildIconModeCombo(Launcher launcher)
+    /// <summary>
+    /// Builds an icon chooser button with a gallery flyout for selecting the launcher's tray icon.
+    /// Returns the button and a custom icon path row (visible only in Custom mode).
+    /// </summary>
+    private (Button Button, Grid CustomRow) BuildIconChooser(Launcher launcher)
     {
-        var combo = new ComboBox { MinWidth = 160 };
-        string iconsDir = Path.Combine(AppContext.BaseDirectory, "Resources", "AppIcons");
+        // ── Preview elements for the button content ──
+        var previewIcon = new FontIcon { FontSize = 18, VerticalAlignment = VerticalAlignment.Center };
+        var previewImage = new Image { Width = 20, Height = 20, VerticalAlignment = VerticalAlignment.Center };
+        var previewEmoji = new TextBlock { FontSize = 18, VerticalAlignment = VerticalAlignment.Center };
+        var previewLabel = new TextBlock { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(8, 0, 0, 0) };
+        var chevron = new FontIcon { Glyph = "\uE70D", FontSize = 10, Opacity = 0.6, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(6, 0, 0, 0) };
 
-        // Composite mode (mode 13) — first item
+        var buttonContent = new StackPanel { Orientation = Orientation.Horizontal };
+        buttonContent.Children.Add(previewIcon);
+        buttonContent.Children.Add(previewImage);
+        buttonContent.Children.Add(previewEmoji);
+        buttonContent.Children.Add(previewLabel);
+        buttonContent.Children.Add(chevron);
+
+        // ── Custom icon path row ──
+        var customIconRow = BuildCustomIconRow(launcher);
+        customIconRow.Visibility = launcher.TrayIconMode == TrayIconModes.Custom ? Visibility.Visible : Visibility.Collapsed;
+
+        void UpdatePreview()
         {
-            var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
-            row.Children.Add(new FontIcon { Glyph = "\uF0E2", FontSize = 16 });
-            row.Children.Add(new TextBlock { Text = "Composite (first 4 items)", VerticalAlignment = VerticalAlignment.Center });
-            combo.Items.Add(new ComboBoxItem { Content = row });
+            string mode = launcher.TrayIconMode;
+            previewIcon.Visibility = Visibility.Collapsed;
+            previewImage.Visibility = Visibility.Collapsed;
+            previewEmoji.Visibility = Visibility.Collapsed;
+            // Clear any custom color from a previous glyph selection
+            previewIcon.ClearValue(FontIcon.ForegroundProperty);
+            previewEmoji.ClearValue(TextBlock.ForegroundProperty);
+
+            if (mode == TrayIconModes.Composite)
+            {
+                previewIcon.Glyph = "\uF0E2";
+                previewIcon.Visibility = Visibility.Visible;
+                previewLabel.Text = "Composite";
+            }
+            else if (mode == TrayIconModes.Custom)
+            {
+                previewIcon.Glyph = "\uE8B9";
+                previewIcon.Visibility = Visibility.Visible;
+                previewLabel.Text = "Custom";
+            }
+            else if (TrayIconModes.IsGlyphMode(mode))
+            {
+                string glyph = TrayIconModes.GetGlyphCharacter(mode) ?? "";
+                string? colorHex = TrayIconModes.GetGlyphColor(mode);
+                SolidColorBrush? colorBrush = null;
+                if (!string.IsNullOrEmpty(colorHex))
+                {
+                    try
+                    {
+                        string h = colorHex.TrimStart('#');
+                        if (h.Length == 6)
+                        {
+                            byte cr = Convert.ToByte(h[..2], 16);
+                            byte cg = Convert.ToByte(h[2..4], 16);
+                            byte cb = Convert.ToByte(h[4..6], 16);
+                            colorBrush = new SolidColorBrush(global::Windows.UI.Color.FromArgb(255, cr, cg, cb));
+                        }
+                    }
+                    catch { /* ignore */ }
+                }
+
+                if (IconGallery.IsFluentGlyph(glyph))
+                {
+                    previewIcon.Glyph = glyph;
+                    if (colorBrush != null)
+                        previewIcon.Foreground = colorBrush;
+                    else
+                        previewIcon.ClearValue(FontIcon.ForegroundProperty);
+                    previewIcon.Visibility = Visibility.Visible;
+                }
+                else
+                {
+                    previewEmoji.Text = glyph;
+                    if (colorBrush != null)
+                        previewEmoji.Foreground = colorBrush;
+                    else
+                        previewEmoji.ClearValue(TextBlock.ForegroundProperty);
+                    previewEmoji.Visibility = Visibility.Visible;
+                }
+                previewLabel.Text = "";
+            }
+            else
+            {
+                // Known preset: color or glyph
+                string iconsDir = Path.Combine(AppContext.BaseDirectory, "Resources", "AppIcons");
+                string[] colorNames = ["Blue", "Green", "Teal", "Red", "Orange", "Purple"];
+                if (colorNames.Contains(mode))
+                {
+                    string pngPath = Path.Combine(iconsDir, $"{mode}.png");
+                    if (File.Exists(pngPath))
+                        previewImage.Source = new BitmapImage(new Uri(pngPath));
+                    previewImage.Visibility = Visibility.Visible;
+                    previewLabel.Text = mode;
+                }
+                else
+                {
+                    // Glyph preset (Pin, Star, Heart, etc.)
+                    (string glyph, string label)[] glyphs = [
+                        ("\uE840", "Pin"), ("\uE734", "Star"), ("\uEB51", "Heart"),
+                        ("\uE945", "Lightning"), ("\uE721", "Search"), ("\uE774", "Globe"),
+                    ];
+                    var match = glyphs.FirstOrDefault(g => g.label == mode);
+                    if (match.glyph != null)
+                    {
+                        previewIcon.Glyph = match.glyph;
+                        previewIcon.Visibility = Visibility.Visible;
+                        previewLabel.Text = match.label;
+                    }
+                    else
+                    {
+                        previewIcon.Glyph = "\uE774";
+                        previewIcon.Visibility = Visibility.Visible;
+                        previewLabel.Text = mode;
+                    }
+                }
+            }
+
+            customIconRow.Visibility = mode == TrayIconModes.Custom
+                ? Visibility.Visible : Visibility.Collapsed;
         }
 
-        // Colour presets
-        string[] colorNames = ["Blue", "Green", "Teal", "Red", "Orange", "Purple"];
-        foreach (var name in colorNames)
-        {
-            double sz = 20;
-            var preview = new Image { Width = sz, Height = sz };
-            string pngPath = Path.Combine(iconsDir, $"{name}.png");
-            if (File.Exists(pngPath))
-                preview.Source = new BitmapImage(new Uri(pngPath));
-            var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
-            row.Children.Add(preview);
-            row.Children.Add(new TextBlock { Text = name, VerticalAlignment = VerticalAlignment.Center });
-            combo.Items.Add(new ComboBoxItem { Content = row });
-        }
+        var button = new Button { Content = buttonContent, Padding = new Thickness(10, 6, 10, 6) };
 
-        // Glyph presets
-        (string glyph, string label)[] glyphs = [
-            ("\uE840", "Pin"), ("\uE734", "Star"), ("\uEB51", "Heart"),
-            ("\uE945", "Lightning"), ("\uE721", "Search"), ("\uE774", "Globe"),
-        ];
-        foreach (var (g, label) in glyphs)
-        {
-            var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
-            row.Children.Add(new FontIcon { Glyph = g, FontSize = 16 });
-            row.Children.Add(new TextBlock { Text = label, VerticalAlignment = VerticalAlignment.Center });
-            combo.Items.Add(new ComboBoxItem { Content = row });
-        }
+        // ── Build the gallery flyout ──
+        var flyout = IconGallery.CreateLauncherIconFlyout(
+            currentMode: launcher.TrayIconMode,
+            onSelected: result =>
+            {
+                if (result.Glyph != null)
+                {
+                    launcher.TrayIconMode = TrayIconModes.ToGlyphMode(result.Glyph, result.Color);
+                    launcher.CustomTrayIconPath = "";
+                }
+                else if (result.ImagePath != null)
+                {
+                    // Copy to AppData as custom tray icon
+                    string destPath = Path.Combine(MainWindow.GetPhysicalAppDataDir(),
+                        $"custom-tray-icon-{launcher.Id}{Path.GetExtension(result.ImagePath)}");
+                    Directory.CreateDirectory(Path.GetDirectoryName(destPath)!);
+                    File.Copy(result.ImagePath, destPath, overwrite: true);
+                    launcher.TrayIconMode = TrayIconModes.Custom;
+                    launcher.CustomTrayIconPath = destPath;
+                }
+                else if (result.PresetMode != null)
+                {
+                    launcher.TrayIconMode = result.PresetMode;
+                    launcher.CustomTrayIconPath = "";
+                }
+                SettingsManager.SaveSettings();
+                UpdatePreview();
+            },
+            onBrowseRequested: async () =>
+            {
+                var picker = new global::Windows.Storage.Pickers.FileOpenPicker();
+                picker.FileTypeFilter.Add(".ico");
+                picker.FileTypeFilter.Add(".png");
+                picker.FileTypeFilter.Add(".jpg");
+                picker.FileTypeFilter.Add(".jpeg");
+                picker.FileTypeFilter.Add(".bmp");
+                WinRT.Interop.InitializeWithWindow.Initialize(picker,
+                    WinRT.Interop.WindowNative.GetWindowHandle(SettingsWindow.GetCurrent()!));
+                var file = await picker.PickSingleFileAsync();
+                if (file != null)
+                {
+                    string destPath = Path.Combine(MainWindow.GetPhysicalAppDataDir(),
+                        $"custom-tray-icon-{launcher.Id}{Path.GetExtension(file.Path)}");
+                    Directory.CreateDirectory(Path.GetDirectoryName(destPath)!);
+                    File.Copy(file.Path, destPath, overwrite: true);
+                    launcher.TrayIconMode = TrayIconModes.Custom;
+                    launcher.CustomTrayIconPath = destPath;
+                    SettingsManager.SaveSettings();
+                    UpdatePreview();
+                }
+            }
+        );
 
-        combo.Items.Add(new ComboBoxItem { Content = "Custom..." });
+        button.Flyout = flyout;
+        UpdatePreview();
 
-        // Select the combo index that corresponds to the launcher's current mode
-        int selectedIdx = Array.IndexOf(IconComboModeMap, launcher.TrayIconMode);
-        combo.SelectedIndex = Math.Clamp(selectedIdx >= 0 ? selectedIdx : 0, 0, combo.Items.Count - 1);
-
-        combo.SelectionChanged += (s, e) =>
-        {
-            if (combo.SelectedIndex >= 0 && combo.SelectedIndex < IconComboModeMap.Length)
-                launcher.TrayIconMode = IconComboModeMap[combo.SelectedIndex];
-            SettingsManager.SaveSettings();
-        };
-
-
-        return combo;
+        return (button, customIconRow);
     }
 
     private Grid BuildCustomIconRow(Launcher launcher)
@@ -564,9 +548,252 @@ public sealed partial class LaunchersPage : Page
         return row;
     }
 
+    // ── Launcher settings dialog ────────────────────────────────────
+
+    private async Task ShowLauncherSettingsDialog(Launcher launcher)
+    {
+        // ── Name row ────────────────────────────────────────────────
+        var nameBox = new TextBox
+        {
+            PlaceholderText = "Launcher name",
+            Text = launcher.Name,
+            MinWidth = 160,
+            MaxWidth = 280,
+        };
+
+        var nameRow = new Grid();
+        nameRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        nameRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+        var nameLabel = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
+        nameLabel.Children.Add(new TextBlock { Text = "Name", FontSize = 14 });
+        nameLabel.Children.Add(new TextBlock { Text = "Display name in tray icon tooltip", FontSize = 12, Opacity = 0.5 });
+        Grid.SetColumn(nameLabel, 0);
+        Grid.SetColumn(nameBox, 1);
+        nameRow.Children.Add(nameLabel);
+        nameRow.Children.Add(nameBox);
+
+        // ── Icon chooser ─────────────────────────────────────────
+        var (iconButton, customIconRow) = BuildIconChooser(launcher);
+
+        var iconRow = new Grid();
+        iconRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        iconRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+        var iconLabel = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
+        iconLabel.Children.Add(new TextBlock { Text = "Icon", FontSize = 14 });
+        iconLabel.Children.Add(new TextBlock { Text = "Icon style for this launcher", FontSize = 12, Opacity = 0.5 });
+        Grid.SetColumn(iconLabel, 0);
+        Grid.SetColumn(iconButton, 1);
+        iconRow.Children.Add(iconLabel);
+        iconRow.Children.Add(iconButton);
+
+        // ── View mode combo ──────────────────────────────────────
+        var viewModeCombo = new ComboBox { MinWidth = 160 };
+        viewModeCombo.Items.Add("Icons");
+        viewModeCombo.Items.Add("List");
+        viewModeCombo.SelectedIndex = Math.Clamp(launcher.ViewMode, 0, 1);
+        viewModeCombo.SelectionChanged += (s, e) =>
+        {
+            launcher.ViewMode = viewModeCombo.SelectedIndex;
+            SettingsManager.SaveSettings();
+            FlyoutWindow.InvalidateItems(launcher.Id);
+        };
+
+        var viewModeRow = new Grid();
+        viewModeRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        viewModeRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+        var viewModeLabel = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
+        viewModeLabel.Children.Add(new TextBlock { Text = "View Mode", FontSize = 14 });
+        viewModeLabel.Children.Add(new TextBlock { Text = "How items appear in the flyout popup", FontSize = 12, Opacity = 0.5 });
+        Grid.SetColumn(viewModeLabel, 0);
+        Grid.SetColumn(viewModeCombo, 1);
+        viewModeRow.Children.Add(viewModeLabel);
+        viewModeRow.Children.Add(viewModeCombo);
+
+        // ── Show title toggle ────────────────────────────────────
+        var showTitleToggle = new ToggleSwitch
+        {
+            IsOn = launcher.ShowTitle,
+            OnContent = "",
+            OffContent = "",
+            MinWidth = 0,
+        };
+        showTitleToggle.Toggled += (s, e) =>
+        {
+            launcher.ShowTitle = showTitleToggle.IsOn;
+            SettingsManager.SaveSettings();
+            FlyoutWindow.InvalidateItems(launcher.Id);
+        };
+
+        var showTitleRow = new Grid();
+        showTitleRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        showTitleRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+        var showTitleLabel = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
+        showTitleLabel.Children.Add(new TextBlock { Text = "Show Title", FontSize = 14 });
+        showTitleLabel.Children.Add(new TextBlock { Text = "Show the launcher name at the top of the flyout", FontSize = 12, Opacity = 0.5 });
+        Grid.SetColumn(showTitleLabel, 0);
+        Grid.SetColumn(showTitleToggle, 1);
+        showTitleRow.Children.Add(showTitleLabel);
+        showTitleRow.Children.Add(showTitleToggle);
+
+        // ── Show in tray toggle ──────────────────────────────────
+        var showToggle = new ToggleSwitch
+        {
+            IsOn = !launcher.NIconHide,
+            OnContent = "",
+            OffContent = "",
+            MinWidth = 0,
+        };
+        showToggle.Toggled += (s, e) =>
+        {
+            launcher.NIconHide = !showToggle.IsOn;
+            SettingsManager.SaveSettings();
+        };
+
+        var hideRow = new Grid();
+        hideRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        hideRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+        var hideLabel = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
+        hideLabel.Children.Add(new TextBlock { Text = "Show in Tray", FontSize = 14 });
+        hideLabel.Children.Add(new TextBlock { Text = "Show this launcher's icon in the system tray", FontSize = 12, Opacity = 0.5 });
+        Grid.SetColumn(hideLabel, 0);
+        Grid.SetColumn(showToggle, 1);
+        hideRow.Children.Add(hideLabel);
+        hideRow.Children.Add(showToggle);
+
+        // ── Pin to taskbar row ──────────────────────────────────
+        var pinBtn = new Button
+        {
+            Content = "Pin to Taskbar",
+            Tag = launcher,
+        };
+        pinBtn.Click += PinToTaskbar_Click;
+
+        var taskbarRow = new Grid();
+        taskbarRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        taskbarRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+        var taskbarLabel = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
+        taskbarLabel.Children.Add(new TextBlock { Text = "Show in Taskbar", FontSize = 14 });
+        taskbarLabel.Children.Add(new TextBlock { Text = "Pin a shortcut to the taskbar for quick access", FontSize = 12, Opacity = 0.5 });
+        Grid.SetColumn(taskbarLabel, 0);
+        Grid.SetColumn(pinBtn, 1);
+        taskbarRow.Children.Add(taskbarLabel);
+        taskbarRow.Children.Add(pinBtn);
+
+        // ── Build dialog content ────────────────────────────────
+        var panel = new StackPanel { Spacing = 12 };
+        panel.Children.Add(nameRow);
+        panel.Children.Add(iconRow);
+        panel.Children.Add(customIconRow);
+        panel.Children.Add(viewModeRow);
+        panel.Children.Add(showTitleRow);
+        panel.Children.Add(hideRow);
+        panel.Children.Add(taskbarRow);
+
+        var dialog = new ContentDialog
+        {
+            XamlRoot = this.XamlRoot,
+            Title = "Launcher Settings",
+            Content = new ScrollViewer { Content = panel, MaxHeight = 500 },
+            CloseButtonText = "Done",
+            DefaultButton = ContentDialogButton.Close,
+        };
+        dialog.Loaded += (s, e) =>
+        {
+            // The ContentDialog template has an internal Border ("BackgroundElement")
+            // constrained by ContentDialogMaxWidth. Walk the tree to override it.
+            if (s is ContentDialog cd)
+            {
+                var bg = FindChild<Border>(cd, "BackgroundElement");
+                if (bg != null)
+                {
+                    bg.MinWidth = 500;
+                    bg.MaxWidth = 500;
+                }
+            }
+        };
+
+        await dialog.ShowAsync();
+
+        // Apply name change
+        launcher.Name = nameBox.Text.Trim();
+        SettingsManager.SaveSettings();
+        MainWindow.Current?.RefreshTrayIcons();
+    }
+
+    private static FrameworkElement BuildLauncherHeaderIcon(Launcher launcher)
+    {
+        string mode = launcher.TrayIconMode;
+
+        if (TrayIconModes.IsGlyphMode(mode))
+        {
+            string glyph = TrayIconModes.GetGlyphCharacter(mode) ?? "";
+            string? colorHex = TrayIconModes.GetGlyphColor(mode);
+            SolidColorBrush? colorBrush = null;
+            if (!string.IsNullOrEmpty(colorHex))
+            {
+                try
+                {
+                    string h = colorHex.TrimStart('#');
+                    if (h.Length == 6)
+                    {
+                        byte cr = Convert.ToByte(h[..2], 16);
+                        byte cg = Convert.ToByte(h[2..4], 16);
+                        byte cb = Convert.ToByte(h[4..6], 16);
+                        colorBrush = new SolidColorBrush(global::Windows.UI.Color.FromArgb(255, cr, cg, cb));
+                    }
+                }
+                catch { /* ignore */ }
+            }
+
+            if (IconGallery.IsFluentGlyph(glyph))
+            {
+                var icon = new FontIcon { Glyph = glyph, FontSize = 16, Margin = new Thickness(0, 0, 8, 0), VerticalAlignment = VerticalAlignment.Center };
+                if (colorBrush != null) icon.Foreground = colorBrush;
+                return icon;
+            }
+            else
+            {
+                var tb = new TextBlock { Text = glyph, FontSize = 16, Margin = new Thickness(0, 0, 8, 0), VerticalAlignment = VerticalAlignment.Center };
+                if (colorBrush != null) tb.Foreground = colorBrush;
+                return tb;
+            }
+        }
+
+        if (mode == TrayIconModes.Custom && !string.IsNullOrEmpty(launcher.CustomTrayIconPath) && File.Exists(launcher.CustomTrayIconPath))
+        {
+            return new Image { Source = new BitmapImage(new Uri(launcher.CustomTrayIconPath)), Width = 16, Height = 16, Margin = new Thickness(0, 0, 8, 0), VerticalAlignment = VerticalAlignment.Center };
+        }
+
+        string iconsDir = Path.Combine(AppContext.BaseDirectory, "Resources", "AppIcons");
+        string[] colorNames = ["Blue", "Green", "Teal", "Red", "Orange", "Purple"];
+        if (colorNames.Contains(mode))
+        {
+            string pngPath = Path.Combine(iconsDir, $"{mode}.png");
+            if (File.Exists(pngPath))
+                return new Image { Source = new BitmapImage(new Uri(pngPath)), Width = 16, Height = 16, Margin = new Thickness(0, 0, 8, 0), VerticalAlignment = VerticalAlignment.Center };
+        }
+
+        (string glyph, string label)[] namedGlyphs = [
+            ("\uE840", "Pin"), ("\uE734", "Star"), ("\uEB51", "Heart"),
+            ("\uE945", "Lightning"), ("\uE721", "Search"), ("\uE774", "Globe"),
+        ];
+        var match = namedGlyphs.FirstOrDefault(g => g.label == mode);
+        if (match.glyph != null)
+            return new FontIcon { Glyph = match.glyph, FontSize = 16, Margin = new Thickness(0, 0, 8, 0), VerticalAlignment = VerticalAlignment.Center };
+
+        // Default: composite icon
+        return new FontIcon { Glyph = "\uF0E2", FontSize = 16, Margin = new Thickness(0, 0, 8, 0), VerticalAlignment = VerticalAlignment.Center };
+    }
+
     // ── Event handlers ──────────────────────────────────────────────
 
-    private void AddLauncherButton_Click(object sender, RoutedEventArgs e)
+    private async void AddLauncherButton_Click(object sender, RoutedEventArgs e)
     {
         var newLauncher = new Launcher
         {
@@ -579,6 +806,10 @@ public sealed partial class LaunchersPage : Page
         // Tell MainWindow to create a tray icon for the new launcher
         MainWindow.Current?.RefreshTrayIcons();
 
+        RebuildLauncherCards();
+
+        // Show settings dialog for new launcher
+        await ShowLauncherSettingsDialog(newLauncher);
         RebuildLauncherCards();
     }
 
@@ -996,5 +1227,19 @@ public sealed partial class LaunchersPage : Page
             CloseButtonText = "OK",
         };
         await dialog.ShowAsync();
+    }
+
+    private static T? FindChild<T>(DependencyObject parent, string name) where T : FrameworkElement
+    {
+        int count = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetChildrenCount(parent);
+        for (int i = 0; i < count; i++)
+        {
+            var child = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetChild(parent, i);
+            if (child is T fe && fe.Name == name)
+                return fe;
+            var result = FindChild<T>(child, name);
+            if (result != null) return result;
+        }
+        return null;
     }
 }

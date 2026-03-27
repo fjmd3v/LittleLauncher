@@ -6,6 +6,7 @@ using LittleLauncher.Windows;
 using Microsoft.Data.Sqlite;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Imaging;
 using System.Collections.ObjectModel;
 using System.IO;
@@ -66,6 +67,12 @@ public partial class LauncherItemsPage : Page
     private ListView? _lastIndicatorListView;
     private bool _isReadOnly;
     private readonly List<Border> _newColumnDropZones = [];
+
+    /// <summary>Column padding added to the total columns width calculation.</summary>
+    private const int ColumnLayoutPadding = 80;
+    private const int ColumnSpacing = 12;
+    private const int ListModeColumnWidth = 280;
+    private const int IconModeColumnWidth = 265;
 
     // -- Cached resources (created once, reused on every pointer/drag event) --
     private static readonly Microsoft.UI.Input.InputSystemCursor _sizeAllCursor =
@@ -168,7 +175,7 @@ public partial class LauncherItemsPage : Page
         // Set up column definitions in the ColumnsPanel Grid.
         // Layout: [dropZone0] [col0] [dropZone1] [col1] ... [dropZoneN]
         // Grid columns: Auto, Fixed, Auto, Fixed, ..., Auto
-        int colFixedWidth = isIconMode ? 265 : 280;
+        int colFixedWidth = isIconMode ? IconModeColumnWidth : ListModeColumnWidth;
         for (int c = 0; c < _columnLists.Count; c++)
         {
             // Drop zone column (between previous column and this one, or before first)
@@ -187,9 +194,8 @@ public partial class LauncherItemsPage : Page
         ColumnsPanel.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         ColumnsPanel.ColumnSpacing = 0;
 
-        // Default to 1000px, but grow if the columns need more space
-        int totalColumnsWidth = _columnLists.Count * colFixedWidth + (_columnLists.Count > 1 ? (_columnLists.Count - 1) * 12 : 0) + 80;
-        RootGrid.MaxWidth = Math.Max(1000, totalColumnsWidth);
+        // Size to fit columns: single column ~360, grows with more columns
+        RootGrid.MaxWidth = CalculateTotalColumnsWidth();
 
         _newColumnDropZones.Clear();
 
@@ -750,48 +756,89 @@ public partial class LauncherItemsPage : Page
         };
         flyout.Items.Add(moveDown);
 
-        if (!isGroup)
         {
-            // Build "Move to..." sub-menu for non-group items
+            // Build "Move to..." sub-menu
             var items = CurrentItems;
             ObservableCollection<LauncherItem>? currentParent = null;
             LauncherItem? currentGroup = null;
-            foreach (var group in items.Where(i => i.IsGroup))
+
+            if (!isGroup)
             {
-                if (group.Children.Contains(item))
+                foreach (var group in items.Where(i => i.IsGroup))
                 {
-                    currentParent = group.Children;
-                    currentGroup = group;
-                    break;
+                    if (group.Children.Contains(item))
+                    {
+                        currentParent = group.Children;
+                        currentGroup = group;
+                        break;
+                    }
                 }
             }
 
-            var moveToSub = new MenuFlyoutSubItem { Text = "Move to...", Icon = new FontIcon { Glyph = "\uE8DE" } };
+            var moveToSub = new MenuFlyoutSubItem { Text = "Move to\u2026", Icon = new FontIcon { Glyph = "\uE8DE" } };
 
-            if (currentParent != null)
+            if (!isGroup)
             {
-                var topLevel = new MenuFlyoutItem { Text = "Top Level", Icon = new FontIcon { Glyph = "\uE74B" } };
-                topLevel.Click += (s, ev) =>
+                if (currentParent != null)
                 {
-                    currentParent.Remove(item);
-                    items.Add(item);
-                    SaveAndUpdateTaskbar();
-                };
-                moveToSub.Items.Add(topLevel);
+                    var topLevel = new MenuFlyoutItem { Text = "Top Level", Icon = new FontIcon { Glyph = "\uE74B" } };
+                    topLevel.Click += (s, ev) =>
+                    {
+                        currentParent.Remove(item);
+                        items.Add(item);
+                        SaveAndUpdateTaskbar();
+                    };
+                    moveToSub.Items.Add(topLevel);
+                }
+
+                foreach (var group in items.Where(i => i.IsGroup))
+                {
+                    if (group == currentGroup) continue;
+                    var targetGroup = group;
+                    var groupOption = new MenuFlyoutItem { Text = group.Name, Icon = new FontIcon { Glyph = "\uF168" } };
+                    groupOption.Click += (s, ev) =>
+                    {
+                        (currentParent ?? items).Remove(item);
+                        targetGroup.Children.Add(item);
+                        SaveAndUpdateTaskbar();
+                    };
+                    moveToSub.Items.Add(groupOption);
+                }
             }
 
-            foreach (var group in items.Where(i => i.IsGroup))
+            // Add "Move to another launcher" options
+            var launchers = SettingsManager.Current.Launchers;
+            var otherLaunchers = launchers.Where(l => l != TargetLauncher).ToList();
+            if (otherLaunchers.Count > 0)
             {
-                if (group == currentGroup) continue;
-                var targetGroup = group;
-                var groupOption = new MenuFlyoutItem { Text = group.Name, Icon = new FontIcon { Glyph = "\uF168" } };
-                groupOption.Click += (s, ev) =>
+                if (moveToSub.Items.Count > 0)
+                    moveToSub.Items.Add(new MenuFlyoutSeparator());
+
+                foreach (var launcher in otherLaunchers)
                 {
-                    (currentParent ?? items).Remove(item);
-                    targetGroup.Children.Add(item);
-                    SaveAndUpdateTaskbar();
-                };
-                moveToSub.Items.Add(groupOption);
+                    var targetLauncher = launcher;
+                    var launcherOption = new MenuFlyoutItem
+                    {
+                        Text = $"{targetLauncher.Name} (launcher)",
+                        Icon = new FontIcon { Glyph = "\uF0E2" },
+                    };
+                    launcherOption.Click += (s, ev) =>
+                    {
+                        // Remove from current location
+                        if (!isGroup)
+                            (currentParent ?? items).Remove(item);
+                        else
+                            items.Remove(item);
+                        // Add to target launcher
+                        targetLauncher.Items.Add(item);
+                        SettingsManager.SaveSettings();
+                        Services.AutoSyncService.NotifyItemsChanged();
+                        FlyoutWindow.InvalidateItems(TargetLauncher?.Id);
+                        FlyoutWindow.InvalidateItems(targetLauncher.Id);
+                        RebuildColumns();
+                    };
+                    moveToSub.Items.Add(launcherOption);
+                }
             }
 
             if (moveToSub.Items.Count > 0)
@@ -1227,10 +1274,7 @@ public partial class LauncherItemsPage : Page
         }
         // Expand MaxWidth to accommodate visible drop zones so the view doesn't scroll
         int dropZoneWidth = _newColumnDropZones.Count * 48;
-        bool isIconMode = TargetLauncher?.ViewMode != 1;
-        int colFixedWidth = isIconMode ? 265 : 280;
-        int totalColumnsWidth = _columnLists.Count * colFixedWidth + (_columnLists.Count > 1 ? (_columnLists.Count - 1) * 12 : 0) + 80;
-        RootGrid.MaxWidth = Math.Max(1000, totalColumnsWidth + dropZoneWidth);
+        RootGrid.MaxWidth = CalculateTotalColumnsWidth() + dropZoneWidth;
     }
 
     private void HideNewColumnDropZones()
@@ -1241,10 +1285,18 @@ public partial class LauncherItemsPage : Page
             zone.BorderThickness = new Thickness(0);
         }
         // Restore normal MaxWidth
-        bool isIconMode = TargetLauncher?.ViewMode != 1;
-        int colFixedWidth = isIconMode ? 265 : 280;
-        int totalColumnsWidth = _columnLists.Count * colFixedWidth + (_columnLists.Count > 1 ? (_columnLists.Count - 1) * 12 : 0) + 80;
-        RootGrid.MaxWidth = Math.Max(1000, totalColumnsWidth);
+        RootGrid.MaxWidth = CalculateTotalColumnsWidth();
+    }
+
+    private int CalculateTotalColumnsWidth()
+    {
+        int colFixedWidth = TargetLauncher?.ViewMode != 1 ? IconModeColumnWidth : ListModeColumnWidth;
+        int cols = _columnLists.Count;
+        int gaps = cols > 1 ? (cols - 1) * ColumnSpacing : 0;
+        int natural = cols * colFixedWidth + gaps + ColumnLayoutPadding;
+        // Minimum width = 2 columns so single-column view isn't too narrow
+        int minWidth = 2 * colFixedWidth + ColumnSpacing + ColumnLayoutPadding;
+        return Math.Max(minWidth, natural);
     }
 
     // -- Insertion indicator helpers --
@@ -1320,6 +1372,8 @@ public partial class LauncherItemsPage : Page
 
         // Track state for this dialog session
         string fetchedIconPath = existingItem?.IconPath ?? "";
+        string? customGlyph = isEdit ? existingItem!.IconGlyph : null;
+        string customColor = existingItem?.IconColor ?? "";
         bool isWebsite = existingItem?.IsWebsite ?? true;
         bool isPwa = existingItem?.IsPwa ?? false;
         bool openInAppWindow = existingItem?.OpenInAppWindow ?? false;
@@ -1611,6 +1665,20 @@ public partial class LauncherItemsPage : Page
             Margin = new Thickness(0, 0, 8, 0),
             VerticalAlignment = VerticalAlignment.Center
         };
+        var iconGlyphPreview = new FontIcon
+        {
+            FontSize = 24,
+            Visibility = Visibility.Collapsed,
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(0, 0, 8, 0)
+        };
+        var iconEmojiPreview = new TextBlock
+        {
+            FontSize = 24,
+            Visibility = Visibility.Collapsed,
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(0, 0, 8, 0)
+        };
         var iconStatus = new TextBlock
         {
             Text = "Auto-detected",
@@ -1624,6 +1692,8 @@ public partial class LauncherItemsPage : Page
             Margin = new Thickness(0, 0, 0, 8)
         };
         iconRow.Children.Add(iconPreview);
+        iconRow.Children.Add(iconGlyphPreview);
+        iconRow.Children.Add(iconEmojiPreview);
         iconRow.Children.Add(iconStatus);
 
         var refreshButton = new Button
@@ -1635,6 +1705,139 @@ public partial class LauncherItemsPage : Page
             FontSize = 12
         };
         iconRow.Children.Add(refreshButton);
+
+        // -- Icon gallery flyout --
+        void RefreshIconPreview()
+        {
+            // Hide all previews first
+            iconPreview.Source = null;
+            iconPreview.Visibility = Visibility.Collapsed;
+            iconGlyphPreview.Visibility = Visibility.Collapsed;
+            iconEmojiPreview.Visibility = Visibility.Collapsed;
+
+            if (!string.IsNullOrEmpty(fetchedIconPath) && File.Exists(fetchedIconPath))
+            {
+                try
+                {
+                    iconPreview.Source = new BitmapImage { DecodePixelWidth = 32, UriSource = new Uri(fetchedIconPath, UriKind.Absolute) };
+                    iconPreview.Visibility = Visibility.Visible;
+                    iconStatus.Text = customGlyph != null ? "Custom image" : (isWebsite ? "Auto favicon" : "Auto icon");
+                }
+                catch
+                {
+                    iconStatus.Text = "Failed to load icon";
+                }
+            }
+            else if (customGlyph != null)
+            {
+                SolidColorBrush? colorBrush = null;
+                if (!string.IsNullOrEmpty(customColor))
+                {
+                    try
+                    {
+                        string h = customColor.TrimStart('#');
+                        if (h.Length == 6)
+                        {
+                            byte r = Convert.ToByte(h[..2], 16);
+                            byte g = Convert.ToByte(h[2..4], 16);
+                            byte b = Convert.ToByte(h[4..6], 16);
+                            colorBrush = new SolidColorBrush(global::Windows.UI.Color.FromArgb(255, r, g, b));
+                        }
+                    }
+                    catch { /* ignore */ }
+                }
+
+                if (IconGallery.IsFluentGlyph(customGlyph))
+                {
+                    iconGlyphPreview.Glyph = customGlyph;
+                    iconGlyphPreview.Foreground = colorBrush ?? (Brush)Application.Current.Resources["TextFillColorPrimaryBrush"];
+                    iconGlyphPreview.Visibility = Visibility.Visible;
+                }
+                else
+                {
+                    iconEmojiPreview.Text = customGlyph;
+                    if (colorBrush != null)
+                        iconEmojiPreview.Foreground = colorBrush;
+                    else
+                        iconEmojiPreview.ClearValue(TextBlock.ForegroundProperty);
+                    iconEmojiPreview.Visibility = Visibility.Visible;
+                }
+                iconStatus.Text = "Custom icon";
+            }
+            else
+            {
+                iconStatus.Text = "No icon";
+            }
+        }
+
+        var chooseIconButton = new Button
+        {
+            Content = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                Spacing = 6,
+                Children =
+                {
+                    new FontIcon { Glyph = "\uE790", FontSize = 12 },
+                    new TextBlock { Text = "Choose" }
+                }
+            },
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(4, 0, 0, 0),
+            Padding = new Thickness(8, 4, 8, 4),
+            FontSize = 12
+        };
+        chooseIconButton.Flyout = IconGallery.CreateFlyout(
+            onSelected: result =>
+            {
+                if (result.Glyph != null)
+                {
+                    customGlyph = result.Glyph;
+                    customColor = result.Color ?? "";
+                    fetchedIconPath = "";
+                }
+                else if (result.ImagePath != null)
+                {
+                    fetchedIconPath = result.ImagePath;
+                    // Keep customGlyph as fallback but image takes priority
+                }
+                RefreshIconPreview();
+            },
+            onBrowseRequested: async () =>
+            {
+                var picker = new FileOpenPicker();
+                picker.FileTypeFilter.Add(".png");
+                picker.FileTypeFilter.Add(".ico");
+                picker.FileTypeFilter.Add(".jpg");
+                picker.FileTypeFilter.Add(".jpeg");
+                picker.FileTypeFilter.Add(".bmp");
+                InitializePicker(picker);
+                var file = await picker.PickSingleFileAsync();
+                if (file != null)
+                {
+                    // Copy to AppData cache for persistence
+                    string cacheDir = Path.Combine(
+                        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                        "LittleLauncher", "icons");
+                    Directory.CreateDirectory(cacheDir);
+                    string dest = Path.Combine(cacheDir, $"custom-{Guid.NewGuid():N}{Path.GetExtension(file.Path)}");
+                    File.Copy(file.Path, dest, true);
+                    fetchedIconPath = dest;
+                    RefreshIconPreview();
+                }
+            },
+            onReset: () =>
+            {
+                customGlyph = null;
+                fetchedIconPath = "";
+                iconPreview.Source = null;
+                iconPreview.Visibility = Visibility.Collapsed;
+                iconGlyphPreview.Visibility = Visibility.Collapsed;
+                iconEmojiPreview.Visibility = Visibility.Collapsed;
+                iconStatus.Text = "Auto-detected";
+            }
+        );
+        iconRow.Children.Add(chooseIconButton);
 
         // -- Type toggle logic --
         void UpdateTypeUI()
@@ -1675,7 +1878,11 @@ public partial class LauncherItemsPage : Page
                 argsBox.Text = "";
                 nameBox.Text = "";
                 fetchedIconPath = "";
+                customGlyph = null;
                 iconPreview.Source = null;
+                iconPreview.Visibility = Visibility.Collapsed;
+                iconGlyphPreview.Visibility = Visibility.Collapsed;
+                iconEmojiPreview.Visibility = Visibility.Collapsed;
                 iconStatus.Text = "Auto-detected";
                 lastFetchedPath = "";
                 appWindowToggle.IsOn = false;
@@ -1735,7 +1942,7 @@ public partial class LauncherItemsPage : Page
                 if (!string.IsNullOrEmpty(iconPath))
                 {
                     fetchedIconPath = iconPath;
-                    UpdateIconPreview(iconPreview, iconStatus, fetchedIconPath, true);
+                    RefreshIconPreview();
                 }
                 else
                 {
@@ -1757,7 +1964,7 @@ public partial class LauncherItemsPage : Page
                 if (!string.IsNullOrEmpty(appIcon))
                 {
                     fetchedIconPath = appIcon;
-                    UpdateIconPreview(iconPreview, iconStatus, fetchedIconPath, false);
+                    RefreshIconPreview();
                 }
                 else
                 {
@@ -1784,7 +1991,7 @@ public partial class LauncherItemsPage : Page
                 if (!string.IsNullOrEmpty(appIcon))
                 {
                     fetchedIconPath = appIcon;
-                    UpdateIconPreview(iconPreview, iconStatus, fetchedIconPath, false);
+                    RefreshIconPreview();
                 }
                 else
                 {
@@ -1875,7 +2082,7 @@ public partial class LauncherItemsPage : Page
                 if (!string.IsNullOrEmpty(iconPath))
                 {
                     fetchedIconPath = iconPath;
-                    UpdateIconPreview(iconPreview, iconStatus, fetchedIconPath, true);
+                    RefreshIconPreview();
                 }
                 else
                 {
@@ -1918,7 +2125,7 @@ public partial class LauncherItemsPage : Page
             }
             argsBox.Text = existingItem.Arguments;
             nameBox.Text = existingItem.Name;
-            UpdateIconPreview(iconPreview, iconStatus, fetchedIconPath, isWebsite);
+            RefreshIconPreview();
             populating = false;
         }
 
@@ -2004,7 +2211,7 @@ public partial class LauncherItemsPage : Page
         var name = nameBox.Text.Trim();
         var finalPath = pathBox.Text.Trim();
         var args = argsBox.Text.Trim();
-        var glyph = isWebsite || isPwa ? "\uE774" : "\uE8E5";
+        var glyph = customGlyph ?? (isWebsite || isPwa ? "\uE774" : "\uE8E5");
 
         if (isEdit)
         {
@@ -2013,6 +2220,7 @@ public partial class LauncherItemsPage : Page
             existingItem.Arguments = args;
             existingItem.IconGlyph = glyph;
             existingItem.IconPath = fetchedIconPath;
+            existingItem.IconColor = customColor;
             existingItem.IsWebsite = isWebsite;
             existingItem.IsPwa = isPwa;
             existingItem.OpenInAppWindow = isWebsite && openInAppWindow;
@@ -2023,6 +2231,7 @@ public partial class LauncherItemsPage : Page
         {
             var newItem = new LauncherItem(name, finalPath, glyph, isWebsite, args, fetchedIconPath, isWebsite && openInAppWindow);
             newItem.IsPwa = isPwa;
+            newItem.IconColor = customColor;
             newItem.AppWindowBrowser = isWebsite && openInAppWindow ? appWindowBrowser : "";
             newItem.AppWindowBrowserProfile = isWebsite && openInAppWindow ? appWindowBrowserProfile : "";
             var target = targetList ?? CurrentItems;
@@ -2030,35 +2239,6 @@ public partial class LauncherItemsPage : Page
         }
 
         SaveAndUpdateTaskbar();
-    }
-
-    private static void UpdateIconPreview(Image preview, TextBlock status, string iconPath, bool isWebsite = true)
-    {
-        string iconLabel = isWebsite ? "favicon" : "icon";
-
-        if (!string.IsNullOrEmpty(iconPath) && File.Exists(iconPath))
-        {
-            try
-            {
-                var bitmap = new BitmapImage
-                {
-                    DecodePixelWidth = 32,
-                    UriSource = new Uri(iconPath, UriKind.Absolute)
-                };
-                preview.Source = bitmap;
-                status.Text = $"Auto {iconLabel}";
-            }
-            catch
-            {
-                preview.Source = null;
-                status.Text = "Failed to load icon";
-            }
-        }
-        else
-        {
-            preview.Source = null;
-            status.Text = "No icon";
-        }
     }
 
     private static TextBlock Label(string text) => new()

@@ -39,6 +39,12 @@ applyTo: "{**/ViewModels/UserSettings*.cs,**/Models/Launcher.cs}"
 
 `LauncherItem.IsExpanded` is `[JsonIgnore]` (defaults `true`) — it tracks the group expand/collapse state in the settings UI but is not persisted to disk. It is a plain property (not `[ObservableProperty]`) since it doesn't need data binding or change notification.
 
+## LauncherItem Icon Properties
+
+- `IconGlyph` (`[ObservableProperty]`, `string`) — Unicode glyph character (Segoe Fluent Icons PUA or emoji). Default `"\uE8E5"`.
+- `IconPath` (`[ObservableProperty]`, `string`) — Local file path to a cached favicon or custom image. Takes priority over `IconGlyph` when set.
+- `IconColor` (`[ObservableProperty]`, `string`) — Optional hex color for the glyph (e.g. `"#FF0000"`). Empty string means default theme color. Only affects glyph rendering (no effect when `IconPath` image is used). Serialized to JSON; omitted when empty (`DefaultIgnoreCondition = WhenWritingDefault`).
+
 ## Launchers Collection
 
 `UserSettings.Launchers` is an `ObservableCollection<Launcher>`. Each `Launcher` holds:

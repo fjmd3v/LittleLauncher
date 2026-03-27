@@ -342,7 +342,8 @@ public sealed partial class SettingsWindow : Window
         SettingsManager.SaveSettings();
         // Refresh tray icons in case launchers were added, removed, or renamed
         MainWindow.Current?.RefreshTrayIcons();
-        // Sync to SFTP so the server has the latest settings
-        AutoSyncService.NotifyItemsChanged();
+        // Flush any pending sync and upload immediately so the server
+        // has the latest settings even if the app is killed shortly after.
+        AutoSyncService.FlushPendingUpload();
     }
 }

@@ -27,6 +27,39 @@ public static class TrayIconModes
     public const string Custom = "Custom";
     public const string Composite = "Composite";
 
+    /// <summary>Prefix for gallery-chosen glyph/emoji icons stored in TrayIconMode.</summary>
+    public const string GlyphPrefix = "Glyph:";
+
+    /// <summary>Returns true if the mode is a gallery-chosen glyph/emoji (starts with "Glyph:").</summary>
+    public static bool IsGlyphMode(string? mode) => mode?.StartsWith(GlyphPrefix, StringComparison.Ordinal) == true;
+
+    /// <summary>Extracts the glyph character(s) from a "Glyph:X" or "Glyph:#RRGGBB:X" mode string.</summary>
+    public static string? GetGlyphCharacter(string? mode)
+    {
+        if (!IsGlyphMode(mode)) return null;
+        string payload = mode![GlyphPrefix.Length..];
+        // If payload starts with "#", color is encoded: "#RRGGBB:glyph"
+        if (payload.StartsWith('#') && payload.Length > 8 && payload[7] == ':')
+            return payload[8..];
+        return payload;
+    }
+
+    /// <summary>Extracts the optional hex color from a "Glyph:#RRGGBB:X" mode string. Returns null if no color.</summary>
+    public static string? GetGlyphColor(string? mode)
+    {
+        if (!IsGlyphMode(mode)) return null;
+        string payload = mode![GlyphPrefix.Length..];
+        if (payload.StartsWith('#') && payload.Length > 8 && payload[7] == ':')
+            return payload[..7]; // "#RRGGBB"
+        return null;
+    }
+
+    /// <summary>Creates a TrayIconMode string for an arbitrary glyph character with optional color.</summary>
+    public static string ToGlyphMode(string glyph, string? color = null) =>
+        string.IsNullOrEmpty(color)
+            ? GlyphPrefix + glyph
+            : GlyphPrefix + color + ":" + glyph;
+
     /// <summary>Maps legacy integer TrayIconMode values to string constants.</summary>
     internal static string FromLegacyInt(int mode) => mode switch
     {
