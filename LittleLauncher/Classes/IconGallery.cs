@@ -4,6 +4,7 @@ using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Imaging;
 using Microsoft.UI.Text;
+using LittleLauncher.Models;
 using System.IO;
 
 namespace LittleLauncher.Classes;
@@ -36,10 +37,16 @@ internal static class IconGallery
     /// <param name="onSelected">Invoked when the user picks an icon.</param>
     /// <param name="onBrowseRequested">Invoked when the user wants to browse for a custom file (caller handles the picker).</param>
     /// <param name="onReset">Invoked when the user clicks "Reset to default".</param>
+    /// <param name="currentGlyph">Current glyph to pre-select when the flyout opens.</param>
+    /// <param name="currentColor">Current hex color to pre-select in the color palette.</param>
+    /// <param name="currentImagePath">Current image path to pre-select in the App Icons tab.</param>
     public static Flyout CreateFlyout(
         Action<IconResult> onSelected,
         Action onBrowseRequested,
-        Action onReset)
+        Action onReset,
+        string? currentGlyph = null,
+        string? currentColor = null,
+        string? currentImagePath = null)
     {
         var flyout = new Flyout();
 
@@ -139,7 +146,7 @@ internal static class IconGallery
             confirmBtn.IsEnabled = true;
         }
 
-        void SelectTab(int tabIndex, string? searchQuery = null)
+        void SelectTab(int tabIndex, string? searchQuery = null, string? currentGlyphToSelect = null, string? currentImageToSelect = null)
         {
             activeTab = tabIndex;
             selectedIconButton = null;
@@ -166,19 +173,19 @@ internal static class IconGallery
                     BuildGlyphsContent(contentPanel, query, icon =>
                     {
                         SetPending(new IconResult(icon.Glyph, null, Color: getSelectedColor()));
-                    }, getSelectedColor(), HighlightIconButton);
+                    }, getSelectedColor(), HighlightIconButton, currentGlyphToSelect);
                     break;
                 case TabEmoji:
                     BuildEmojiContent(contentPanel, query, emoji =>
                     {
                         SetPending(new IconResult(emoji, null, Color: getSelectedColor()));
-                    }, getSelectedColor(), HighlightIconButton);
+                    }, getSelectedColor(), HighlightIconButton, currentGlyphToSelect);
                     break;
                 case TabAppIcons:
                     BuildAppIconsContent(contentPanel, query, path =>
                     {
                         SetPending(new IconResult(null, path));
-                    }, HighlightIconButton);
+                    }, HighlightIconButton, currentImageToSelect);
                     break;
             }
         }
@@ -204,7 +211,7 @@ internal static class IconGallery
         root.Children.Add(tabBar);
 
         // ── Color palette ──
-        var (palette, colorGetter) = BuildColorPalette(null,
+        var (palette, colorGetter) = BuildColorPalette(currentColor,
             onColorChanged: () => SelectTab(activeTab, searchBox.Text));
         colorPalette = palette;
         getSelectedColor = colorGetter;
@@ -253,12 +260,28 @@ internal static class IconGallery
 
         flyout.Content = root;
 
-        // Initial load
+        // Initial load — pre-select the current icon if provided
         flyout.Opened += (s, e) =>
         {
             pendingSelection = null;
             confirmBtn.IsEnabled = false;
-            SelectTab(TabGlyphs);
+
+            // Determine which tab to open based on current icon
+            if (!string.IsNullOrEmpty(currentImagePath))
+            {
+                // Check if image is an app color icon
+                string fileName = Path.GetFileName(currentImagePath);
+                if (fileName.StartsWith("app-", StringComparison.OrdinalIgnoreCase))
+                    SelectTab(TabAppIcons, null, currentImageToSelect: currentImagePath);
+                else
+                    SelectTab(TabGlyphs); // custom file — no tab to pre-select in
+            }
+            else if (!string.IsNullOrEmpty(currentGlyph) && !IsFluentGlyph(currentGlyph))
+                SelectTab(TabEmoji, null, currentGlyphToSelect: currentGlyph);
+            else if (!string.IsNullOrEmpty(currentGlyph))
+                SelectTab(TabGlyphs, null, currentGlyphToSelect: currentGlyph);
+            else
+                SelectTab(TabGlyphs);
         };
 
         return flyout;
@@ -368,7 +391,7 @@ internal static class IconGallery
             confirmBtnL.IsEnabled = true;
         }
 
-        void SelectTab(int tabIndex, string? searchQuery = null)
+        void SelectTab(int tabIndex, string? searchQuery = null, string? currentGlyphToSelect = null, string? currentPresetToSelect = null)
         {
             activeTab = tabIndex;
             selectedIconButtonL = null;
@@ -399,19 +422,19 @@ internal static class IconGallery
                     {
                         flyout.Hide();
                         onBrowseRequested();
-                    }, HighlightIconButtonL);
+                    }, HighlightIconButtonL, currentPresetToSelect);
                     break;
                 case TabGlyphsL:
                     BuildGlyphsContent(contentPanel, query, icon =>
                     {
                         SetPendingL(new IconResult(icon.Glyph, null, Color: getSelectedColorL()));
-                    }, getSelectedColorL(), HighlightIconButtonL);
+                    }, getSelectedColorL(), HighlightIconButtonL, currentGlyphToSelect);
                     break;
                 case TabEmojiL:
                     BuildEmojiContent(contentPanel, query, emoji =>
                     {
                         SetPendingL(new IconResult(emoji, null, Color: getSelectedColorL()));
-                    }, getSelectedColorL(), HighlightIconButtonL);
+                    }, getSelectedColorL(), HighlightIconButtonL, currentGlyphToSelect);
                     break;
             }
         }
@@ -437,7 +460,8 @@ internal static class IconGallery
         root.Children.Add(tabBar);
 
         // ── Color palette ──
-        var (paletteL, colorGetterL) = BuildColorPalette(null,
+        string? initialColorL = TrayIconModes.IsGlyphMode(currentMode) ? TrayIconModes.GetGlyphColor(currentMode) : null;
+        var (paletteL, colorGetterL) = BuildColorPalette(initialColorL,
             onColorChanged: () => SelectTab(activeTab, searchBox.Text));
         colorPaletteL = paletteL;
         getSelectedColorL = colorGetterL;
@@ -449,11 +473,27 @@ internal static class IconGallery
         searchBox.TextChanged += (s, e) => SelectTab(activeTab, searchBox.Text);
 
         flyout.Content = root;
+
+        // Initial load — pre-select the current icon if provided
         flyout.Opened += (s, e) =>
         {
             pendingSelectionL = null;
             confirmBtnL.IsEnabled = false;
-            SelectTab(TabPresets);
+
+            if (TrayIconModes.IsGlyphMode(currentMode))
+            {
+                string? glyph = TrayIconModes.GetGlyphCharacter(currentMode);
+                if (!string.IsNullOrEmpty(glyph) && !IsFluentGlyph(glyph))
+                    SelectTab(TabEmojiL, null, currentGlyphToSelect: glyph);
+                else if (!string.IsNullOrEmpty(glyph))
+                    SelectTab(TabGlyphsL, null, currentGlyphToSelect: glyph);
+                else
+                    SelectTab(TabPresets);
+            }
+            else if (!string.IsNullOrEmpty(currentMode) && currentMode != TrayIconModes.Custom)
+                SelectTab(TabPresets, null, currentPresetToSelect: currentMode);
+            else
+                SelectTab(TabPresets);
         };
 
         return flyout;
@@ -463,7 +503,7 @@ internal static class IconGallery
     //  Tab Content Builders
     // ═══════════════════════════════════════════════════════════
 
-    private static void BuildGlyphsContent(StackPanel panel, string query, Action<(string Glyph, string Name)> onPick, string? previewColor = null, Action<Button>? onButtonClicked = null)
+    private static void BuildGlyphsContent(StackPanel panel, string query, Action<(string Glyph, string Name)> onPick, string? previewColor = null, Action<Button>? onButtonClicked = null, string? currentGlyph = null)
     {
         Brush? colorBrush = ParseHexBrush(previewColor);
         foreach (var (category, icons) in FluentIconCategories)
@@ -497,6 +537,14 @@ internal static class IconGallery
                 btn.Content = fi;
                 ToolTipService.SetToolTip(btn, icon.Name);
                 btn.Click += (s, e) => { onButtonClicked?.Invoke((Button)s!); onPick(icon); };
+
+                // Pre-select if this matches the current icon
+                if (currentGlyph != null && icon.Glyph == currentGlyph)
+                {
+                    onButtonClicked?.Invoke(btn);
+                    onPick(icon);
+                }
+
                 currentRow.Children.Add(btn);
 
                 if (++count % IconsPerRow == 0)
@@ -515,7 +563,7 @@ internal static class IconGallery
             panel.Children.Add(NoResults());
     }
 
-    private static void BuildEmojiContent(StackPanel panel, string query, Action<string> onPick, string? previewColor = null, Action<Button>? onButtonClicked = null)
+    private static void BuildEmojiContent(StackPanel panel, string query, Action<string> onPick, string? previewColor = null, Action<Button>? onButtonClicked = null, string? currentGlyph = null)
     {
         Brush? colorBrush = ParseHexBrush(previewColor);
         foreach (var (category, emojis) in EmojiCategories)
@@ -554,6 +602,14 @@ internal static class IconGallery
                 };
                 ToolTipService.SetToolTip(btn, emoji.Name);
                 btn.Click += (s, e) => { onButtonClicked?.Invoke((Button)s!); onPick(emoji.Emoji); };
+
+                // Pre-select if this matches the current icon
+                if (currentGlyph != null && emoji.Emoji == currentGlyph)
+                {
+                    onButtonClicked?.Invoke(btn);
+                    onPick(emoji.Emoji);
+                }
+
                 currentRow.Children.Add(btn);
 
                 if (++count % IconsPerRow == 0)
@@ -572,7 +628,7 @@ internal static class IconGallery
             panel.Children.Add(NoResults());
     }
 
-    private static void BuildAppIconsContent(StackPanel panel, string query, Action<string> onImageSelected, Action<Button>? onButtonClicked = null)
+    private static void BuildAppIconsContent(StackPanel panel, string query, Action<string> onImageSelected, Action<Button>? onButtonClicked = null, string? currentImagePath = null)
     {
         var colors = new[] { "Blue", "Green", "Teal", "Red", "Orange", "Purple" };
         var filtered = string.IsNullOrEmpty(query)
@@ -637,6 +693,20 @@ internal static class IconGallery
                 onImageSelected(dest);
             };
 
+            // Pre-select if this matches the current icon
+            if (currentImagePath != null &&
+                Path.GetFileName(currentImagePath).Equals($"app-{color.ToLowerInvariant()}.png", StringComparison.OrdinalIgnoreCase))
+            {
+                onButtonClicked?.Invoke(btn);
+                string cacheDir = Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                    "LittleLauncher", "icons");
+                Directory.CreateDirectory(cacheDir);
+                string dest = Path.Combine(cacheDir, $"app-{color.ToLowerInvariant()}.png");
+                File.Copy(sourcePath, dest, true);
+                onImageSelected(dest);
+            }
+
             currentRow.Children.Add(btn);
         }
 
@@ -645,7 +715,7 @@ internal static class IconGallery
     }
 
     private static void BuildLauncherPresetsContent(StackPanel panel, string query,
-        Action<string> onPresetMode, Action onBrowseRequested, Action<Button>? onButtonClicked = null)
+        Action<string> onPresetMode, Action onBrowseRequested, Action<Button>? onButtonClicked = null, string? currentPresetMode = null)
     {
         // ── Composite mode ──
         if (string.IsNullOrEmpty(query) || "composite".Contains(query, StringComparison.OrdinalIgnoreCase))
@@ -668,6 +738,7 @@ internal static class IconGallery
             compositeRow.Children.Add(compositeText);
             compositeBtn.Content = compositeRow;
             compositeBtn.Click += (s, e) => { onButtonClicked?.Invoke((Button)s!); onPresetMode("Composite"); };
+            if (currentPresetMode == "Composite") { onButtonClicked?.Invoke(compositeBtn); onPresetMode("Composite"); }
             panel.Children.Add(compositeBtn);
         }
 
@@ -715,6 +786,7 @@ internal static class IconGallery
                 btn.Content = content;
                 ToolTipService.SetToolTip(btn, $"{color} app icon");
                 btn.Click += (s, e) => { onButtonClicked?.Invoke((Button)s!); onPresetMode(color); };
+                if (currentPresetMode == color) { onButtonClicked?.Invoke(btn); onPresetMode(color); }
                 currentRow.Children.Add(btn);
 
                 // Wrap after 6 items per row (fits ~396px width)

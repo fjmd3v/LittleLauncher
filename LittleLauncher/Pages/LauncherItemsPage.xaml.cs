@@ -1835,7 +1835,10 @@ public partial class LauncherItemsPage : Page
                 iconGlyphPreview.Visibility = Visibility.Collapsed;
                 iconEmojiPreview.Visibility = Visibility.Collapsed;
                 iconStatus.Text = "Auto-detected";
-            }
+            },
+            currentGlyph: customGlyph,
+            currentColor: customColor,
+            currentImagePath: fetchedIconPath
         );
         iconRow.Children.Add(chooseIconButton);
 
