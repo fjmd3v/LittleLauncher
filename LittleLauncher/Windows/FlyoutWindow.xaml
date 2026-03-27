@@ -174,6 +174,19 @@
             </MenuFlyout>
         </Grid.ContextFlyout>
 
-        <StackPanel x:Name="ColumnsPanel" Orientation="Horizontal" />
+        <StackPanel>
+            <TextBlock x:Name="LauncherTitle"
+                       FontSize="12"
+                       FontWeight="SemiBold"
+                       Opacity="0.7"
+                       Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                       TextWrapping="NoWrap"
+                       TextTrimming="CharacterEllipsis"
+                       TextAlignment="Center"
+                       HorizontalAlignment="Stretch"
+                       Margin="16,8,16,0"
+                       Visibility="Collapsed" />
+            <StackPanel x:Name="ColumnsPanel" Orientation="Horizontal" />
+        </StackPanel>
     </Grid>
 </Window>

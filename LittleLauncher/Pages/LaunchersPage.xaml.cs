@@ -116,10 +116,12 @@ public sealed partial class LaunchersPage : Page
 
         // ── Custom icon path row (visible only when TrayIconMode == 12) ────
         var customIconRow = BuildCustomIconRow(launcher);
-        customIconRow.Visibility = launcher.TrayIconMode == 12 ? Visibility.Visible : Visibility.Collapsed;
+        customIconRow.Visibility = launcher.TrayIconMode == TrayIconModes.Custom ? Visibility.Visible : Visibility.Collapsed;
         iconCombo.SelectionChanged += (s, e) =>
         {
-            customIconRow.Visibility = iconCombo.SelectedIndex == 12
+            string mode = (iconCombo.SelectedIndex >= 0 && iconCombo.SelectedIndex < IconComboModeMap.Length)
+                ? IconComboModeMap[iconCombo.SelectedIndex] : "";
+            customIconRow.Visibility = mode == TrayIconModes.Custom
                 ? Visibility.Visible : Visibility.Collapsed;
         };
 
@@ -248,6 +250,35 @@ public sealed partial class LaunchersPage : Page
         content.Children.Add(iconRow);
         content.Children.Add(customIconRow);
         content.Children.Add(viewModeRow);
+
+        // ── Show title toggle ────────────────────────────────────────
+        var showTitleToggle = new ToggleSwitch
+        {
+            IsOn = launcher.ShowTitle,
+            OnContent = "",
+            OffContent = "",
+            MinWidth = 0,
+        };
+        showTitleToggle.Toggled += (s, e) =>
+        {
+            launcher.ShowTitle = showTitleToggle.IsOn;
+            SettingsManager.SaveSettings();
+            FlyoutWindow.InvalidateItems(launcher.Id);
+        };
+
+        var showTitleRow = new Grid();
+        showTitleRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        showTitleRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+        var showTitleLabel = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
+        showTitleLabel.Children.Add(new TextBlock { Text = "Show Title", FontSize = 14 });
+        showTitleLabel.Children.Add(new TextBlock { Text = "Show the launcher name at the top of the flyout", FontSize = 12, Opacity = 0.5 });
+        Grid.SetColumn(showTitleLabel, 0);
+        Grid.SetColumn(showTitleToggle, 1);
+        showTitleRow.Children.Add(showTitleLabel);
+        showTitleRow.Children.Add(showTitleToggle);
+
+        content.Children.Add(showTitleRow);
         content.Children.Add(hideRow);
         content.Children.Add(taskbarRow);
         content.Children.Add(itemsRow);
@@ -347,6 +378,42 @@ public sealed partial class LaunchersPage : Page
             headerButtons.Children.Add(shareBtn);
         }
 
+        // ── Move up / down buttons ─────────────────────────────────
+        var launchers = SettingsManager.Current.Launchers;
+        int launcherIndex = launchers.IndexOf(launcher);
+
+        var moveUpBtn = new Button
+        {
+            Content = new FontIcon { Glyph = "\uE70E", FontSize = 12 },
+            Tag = launcher,
+            Padding = new Thickness(6, 4, 6, 4),
+            MinWidth = 0,
+            MinHeight = 0,
+            VerticalAlignment = VerticalAlignment.Center,
+            Background = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["SubtleFillColorTransparentBrush"],
+            BorderThickness = new Thickness(0),
+            IsEnabled = launcherIndex > 0,
+        };
+        ToolTipService.SetToolTip(moveUpBtn, "Move up");
+        moveUpBtn.Click += MoveLauncherUp_Click;
+        headerButtons.Children.Add(moveUpBtn);
+
+        var moveDownBtn = new Button
+        {
+            Content = new FontIcon { Glyph = "\uE70D", FontSize = 12 },
+            Tag = launcher,
+            Padding = new Thickness(6, 4, 6, 4),
+            MinWidth = 0,
+            MinHeight = 0,
+            VerticalAlignment = VerticalAlignment.Center,
+            Background = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["SubtleFillColorTransparentBrush"],
+            BorderThickness = new Thickness(0),
+            IsEnabled = launcherIndex < launchers.Count - 1,
+        };
+        ToolTipService.SetToolTip(moveDownBtn, "Move down");
+        moveDownBtn.Click += MoveLauncherDown_Click;
+        headerButtons.Children.Add(moveDownBtn);
+
         headerButtons.Children.Add(deleteBtn);
 
         var header = new Grid();
@@ -382,13 +449,32 @@ public sealed partial class LaunchersPage : Page
         return card;
     }
 
+    // Maps combo box index → TrayIconMode string constant.
+    // Composite is first so it's the most visible option.
+    private static readonly string[] IconComboModeMap = [
+        TrayIconModes.Composite,
+        TrayIconModes.Blue, TrayIconModes.Green, TrayIconModes.Teal,
+        TrayIconModes.Red, TrayIconModes.Orange, TrayIconModes.Purple,
+        TrayIconModes.Pin, TrayIconModes.Star, TrayIconModes.Heart,
+        TrayIconModes.Lightning, TrayIconModes.Search, TrayIconModes.Globe,
+        TrayIconModes.Custom,
+    ];
+
     private static ComboBox BuildIconModeCombo(Launcher launcher)
     {
         var combo = new ComboBox { MinWidth = 160 };
+        string iconsDir = Path.Combine(AppContext.BaseDirectory, "Resources", "AppIcons");
+
+        // Composite mode (mode 13) — first item
+        {
+            var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+            row.Children.Add(new FontIcon { Glyph = "\uF0E2", FontSize = 16 });
+            row.Children.Add(new TextBlock { Text = "Composite (first 4 items)", VerticalAlignment = VerticalAlignment.Center });
+            combo.Items.Add(new ComboBoxItem { Content = row });
+        }
 
         // Colour presets
         string[] colorNames = ["Blue", "Green", "Teal", "Red", "Orange", "Purple"];
-        string iconsDir = Path.Combine(AppContext.BaseDirectory, "Resources", "AppIcons");
         foreach (var name in colorNames)
         {
             double sz = 20;
@@ -416,13 +502,18 @@ public sealed partial class LaunchersPage : Page
         }
 
         combo.Items.Add(new ComboBoxItem { Content = "Custom..." });
-        combo.SelectedIndex = Math.Clamp(launcher.TrayIconMode, 0, combo.Items.Count - 1);
+
+        // Select the combo index that corresponds to the launcher's current mode
+        int selectedIdx = Array.IndexOf(IconComboModeMap, launcher.TrayIconMode);
+        combo.SelectedIndex = Math.Clamp(selectedIdx >= 0 ? selectedIdx : 0, 0, combo.Items.Count - 1);
 
         combo.SelectionChanged += (s, e) =>
         {
-            launcher.TrayIconMode = combo.SelectedIndex;
+            if (combo.SelectedIndex >= 0 && combo.SelectedIndex < IconComboModeMap.Length)
+                launcher.TrayIconMode = IconComboModeMap[combo.SelectedIndex];
             SettingsManager.SaveSettings();
         };
+
 
         return combo;
     }
@@ -500,9 +591,37 @@ public sealed partial class LaunchersPage : Page
         }
     }
 
+    private void MoveLauncherUp_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement fe || fe.Tag is not Launcher launcher) return;
+        var launchers = SettingsManager.Current.Launchers;
+        int idx = launchers.IndexOf(launcher);
+        if (idx <= 0) return;
+        launchers.Move(idx, idx - 1);
+        SettingsManager.SaveSettings();
+        MainWindow.Current?.RefreshTrayIcons();
+        RebuildLauncherCards();
+    }
+
+    private void MoveLauncherDown_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement fe || fe.Tag is not Launcher launcher) return;
+        var launchers = SettingsManager.Current.Launchers;
+        int idx = launchers.IndexOf(launcher);
+        if (idx < 0 || idx >= launchers.Count - 1) return;
+        launchers.Move(idx, idx + 1);
+        SettingsManager.SaveSettings();
+        MainWindow.Current?.RefreshTrayIcons();
+        RebuildLauncherCards();
+    }
+
     private async void PinToTaskbar_Click(object sender, RoutedEventArgs e)
     {
         if (sender is not FrameworkElement fe || fe.Tag is not Launcher launcher) return;
+
+        // Ensure the per-launcher icon .ico exists so the shortcut and
+        // companion exe can reference it.
+        MainWindow.EnsureLauncherIconSaved(launcher);
 
         // Ensure the per-launcher Start Menu shortcut exists with the correct
         // AUMID, target args, and icon.  When the user pins the running

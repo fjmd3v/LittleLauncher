@@ -47,4 +47,12 @@ Helpers:
 
 ## IShellItemImageFactory COM Section
 
-The `#region shell32.dll` section includes `SHCreateItemFromParsingName` and the `IShellItemImageFactory` COM interface for extracting app icons from `shell:AppsFolder` items (used for PWA icons). The `#region gdi32.dll` section provides `DeleteObject` (HBITMAP cleanup) and `GetObject` (reading DIB pixel data via the `BITMAP` struct).
+The `#region shell32.dll` section includes `SHCreateItemFromParsingName` and the `IShellItemImageFactory` COM interface for extracting app icons from `shell:AppsFolder` items (used for PWA icons). The `#region gdi32.dll` section provides `DeleteObject` (HBITMAP cleanup), `GetObject` (reading DIB pixel data via the `BITMAP` struct), and `GetObjectDibSection` (reading `DIBSECTION` including the `BITMAPINFOHEADER.biHeight` sign for row-order detection).
+
+### DIB structs
+
+| Struct | Purpose |
+|---|---|
+| `BITMAP` | Basic bitmap dimensions and pixel pointer from `GetObject` |
+| `BITMAPINFOHEADER` | Extended header with signed `biHeight` (positive = bottom-up, negative = top-down) |
+| `DIBSECTION` | Full DIB info from `GetObjectDibSection`, contains both `BITMAP` and `BITMAPINFOHEADER` |

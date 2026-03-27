@@ -5,20 +5,21 @@ applyTo: "**/MainWindow.xaml.cs,**/SettingsWindow.xaml.cs,**/LaunchersPage.xaml*
 
 # Icon System
 
-Little Launcher uses a flat upright rocket as its identity icon. Users can change the **tray icon** and **pinned taskbar icon** to a different color variant, a glyph preset, or a custom image.
+Little Launcher uses a flat upright rocket as its identity icon. The **app identity** (Start Menu, settings window, Home page) always shows the blue rocket. Users can change each launcher's **tray icon** and **pinned taskbar icon** independently.
 
 ## Icon Surfaces
 
 | Surface | Source | User-configurable? |
 |---|---|---|
-| **System tray (per launcher)** | `ResolveTrayIcon(Launcher)` → preset PNG, glyph, or custom image | Yes (`Launcher.TrayIconMode`) |
-| **Pinned taskbar shortcut** | `app-icon.ico` in `<AppDataDir>` via `.lnk` IconLocation | Yes (follows first launcher's `TrayIconMode`) |
-| **Settings window titlebar** | `settings-icon.ico` (first launcher's icon + gear overlay) | Yes (follows first launcher's `TrayIconMode`) |
-| **Settings window taskbar entry** | `settings-icon.ico` via `WM_SETICON` + `AppWindow.SetIcon(IconId)` | Yes (follows first launcher's `TrayIconMode`) |
-| **Settings window Alt-Tab** | `settings-icon.ico` via `AppWindow.SetIcon(IconId)` | Yes (follows first launcher's `TrayIconMode`) |
-| **Start menu shortcut** | `app-icon.ico` via `GetShortcutIconLocation()` | Yes (follows first launcher's `TrayIconMode`) |
+| **System tray (per launcher)** | `ResolveTrayIcon(Launcher)` → preset PNG, glyph, composite, or custom image | Yes (`Launcher.TrayIconMode`) |
+| **Pinned taskbar shortcut** | Per-launcher `app-icon-{id}.ico` in `<AppDataDir>` via `.lnk` IconLocation | Yes (per launcher `TrayIconMode`) |
+| **Settings window titlebar** | `settings-icon.ico` (blue rocket + gear overlay) | No — always Blue rocket |
+| **Settings window taskbar entry** | `settings-icon.ico` via `WM_SETICON` + `AppWindow.SetIcon(IconId)` | No — always Blue rocket |
+| **Settings window Alt-Tab** | `settings-icon.ico` via `AppWindow.SetIcon(IconId)` | No — always Blue rocket |
+| **Home page app icon** | `Resources/AppIcons/Blue.png` loaded directly | No — always Blue rocket |
+| **Start menu shortcut** | `exe,0` (embedded icon) | No — always Blue rocket |
 | **Exe embedded icon** | `Resources/LittleLauncher.ico` (compiled into exe) | No — always Blue rocket |
-| **Pin-to-taskbar dialog** | `app-icon.ico` loaded via `WM_SETICON` in companion exe | Yes (follows first launcher's `TrayIconMode`) |
+| **Pin-to-taskbar dialog** | Per-launcher `app-icon-{id}.ico` loaded via `WM_SETICON` in companion exe | Yes (per launcher `TrayIconMode`) |
 
 ## Key Files
 
@@ -34,24 +35,27 @@ Little Launcher uses a flat upright rocket as its identity icon. Users can chang
 
 ## TrayIconMode Values
 
-| Mode | Type | Source |
-|------|------|--------|
-| 0 | Blue (default) | `AppIcons/Blue.png` |
-| 1 | Green | `AppIcons/Green.png` |
-| 2 | Teal | `AppIcons/Teal.png` |
-| 3 | Red | `AppIcons/Red.png` |
-| 4 | Orange | `AppIcons/Orange.png` |
-| 5 | Purple | `AppIcons/Purple.png` |
-| 6 | Pin glyph | Segoe Fluent Icons `\uE840` |
-| 7 | Star glyph | Segoe Fluent Icons `\uE734` |
-| 8 | Heart glyph | Segoe Fluent Icons `\uEB51` |
-| 9 | Lightning glyph | Segoe Fluent Icons `\uE945` |
-| 10 | Search glyph | Segoe Fluent Icons `\uE721` |
-| 11 | Globe glyph | Segoe Fluent Icons `\uE774` |
-| 12 | Custom | User-provided file |
+`Launcher.TrayIconMode` is a **string** property. Values are defined as constants in `TrayIconModes` (in `Launcher.cs`). A `TrayIconModeJsonConverter` handles reading legacy integer values from older settings files.
 
-Preset icons (0–5) are full-color PNGs — they do **not** change with OS theme.
-Glyph presets (6–11) render in black (light theme) or white (dark theme) and update automatically on theme change.
+| Mode string | Type | Source |
+|-------------|------|--------|
+| `"Composite"` | Composite (default) | 2×2 grid of first 4 item icons |
+| `"Blue"` | Blue rocket | `AppIcons/Blue.png` |
+| `"Green"` | Green rocket | `AppIcons/Green.png` |
+| `"Teal"` | Teal rocket | `AppIcons/Teal.png` |
+| `"Red"` | Red rocket | `AppIcons/Red.png` |
+| `"Orange"` | Orange rocket | `AppIcons/Orange.png` |
+| `"Purple"` | Purple rocket | `AppIcons/Purple.png` |
+| `"Pin"` | Pin glyph | Segoe Fluent Icons `\uE840` |
+| `"Star"` | Star glyph | Segoe Fluent Icons `\uE734` |
+| `"Heart"` | Heart glyph | Segoe Fluent Icons `\uEB51` |
+| `"Lightning"` | Lightning glyph | Segoe Fluent Icons `\uE945` |
+| `"Search"` | Search glyph | Segoe Fluent Icons `\uE721` |
+| `"Globe"` | Globe glyph | Segoe Fluent Icons `\uE774` |
+| `"Custom"` | Custom | User-provided file |
+
+Preset icons are full-color PNGs — they do **not** change with OS theme.
+Glyph presets render in black (light theme) or white (dark theme) and update automatically on theme change.
 
 ## How Icon Updates Flow
 
@@ -70,7 +74,10 @@ All icon surfaces derive from a single source of truth: `ResolveBaseIconBitmap(L
 | Method | Purpose |
 |---|---|
 | `ResolveBaseIconBitmap(Launcher)` | Single source of truth — returns 256×256 bitmap for a launcher's `TrayIconMode` |
-| `RenderGlyphBitmap()` | Renders a Segoe Fluent Icons glyph to 256×256 bitmap (called by `ResolveBaseIconBitmap` for modes 6–11) |
+| `RenderGlyphBitmap()` | Renders a Segoe Fluent Icons glyph to bitmap at specified size (called by `ResolveBaseIconBitmap` for glyph modes and composite sub-icons) |
+| `RenderCompositeIconBitmap()` | Renders a 2×2 grid composite from first 4 launchable items (`"Composite"` mode) |
+| `CollectLaunchableItems()` | Collects first N launchable items from a launcher, flattening groups, skipping headings/column breaks |
+| `RoundedRectPath()` | Creates a `GraphicsPath` for a rounded rectangle (used by composite background) |
 | `TrimAndResizeTo256()` | Trims transparent padding, centers on 256×256 canvas (called for presets + custom images) |
 | `BitmapToIcon()` | Converts a bitmap to multi-resolution ICO (16–256px) |
 | `ResolveTrayIcon(Launcher)` | `ResolveBaseIconBitmap(Launcher)` → `BitmapToIcon()` |

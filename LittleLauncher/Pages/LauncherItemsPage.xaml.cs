@@ -65,7 +65,7 @@ public partial class LauncherItemsPage : Page
     private ListViewItem? _lastIndicatorContainer;
     private ListView? _lastIndicatorListView;
     private bool _isReadOnly;
-    private Border? _newColumnDropZone;
+    private readonly List<Border> _newColumnDropZones = [];
 
     // -- Cached resources (created once, reused on every pointer/drag event) --
     private static readonly Microsoft.UI.Input.InputSystemCursor _sizeAllCursor =
@@ -165,28 +165,37 @@ public partial class LauncherItemsPage : Page
         ColumnsPanel.ColumnDefinitions.Clear();
         ColumnsPanel.RowDefinitions.Clear();
 
-        // Set up column definitions in the ColumnsPanel Grid
+        // Set up column definitions in the ColumnsPanel Grid.
+        // Layout: [dropZone0] [col0] [dropZone1] [col1] ... [dropZoneN]
+        // Grid columns: Auto, Fixed, Auto, Fixed, ..., Auto
         int colFixedWidth = isIconMode ? 265 : 280;
         for (int c = 0; c < _columnLists.Count; c++)
         {
+            // Drop zone column (between previous column and this one, or before first)
+            ColumnsPanel.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            // Content column
             ColumnsPanel.ColumnDefinitions.Add(new ColumnDefinition
             {
-                Width = _columnLists.Count > 1 ? new GridLength(colFixedWidth) : new GridLength(1, GridUnitType.Star)
+                Width = new GridLength(colFixedWidth)
             });
         }
-        // Extra column for the "new column" drop zone
+        // Final drop zone column (after the last content column)
         ColumnsPanel.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
         // Two rows: Auto for header, Star for the ListView
         ColumnsPanel.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         ColumnsPanel.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-        ColumnsPanel.ColumnSpacing = _columnLists.Count > 1 ? 12 : 0;
+        ColumnsPanel.ColumnSpacing = 0;
 
-        // Single column caps at 1000px; multi-column uses fixed widths so no cap needed
-        RootGrid.MaxWidth = _columnLists.Count > 1 ? double.PositiveInfinity : 1000;
+        // Default to 1000px, but grow if the columns need more space
+        int totalColumnsWidth = _columnLists.Count * colFixedWidth + (_columnLists.Count > 1 ? (_columnLists.Count - 1) * 12 : 0) + 80;
+        RootGrid.MaxWidth = Math.Max(1000, totalColumnsWidth);
+
+        _newColumnDropZones.Clear();
 
         for (int colIdx = 0; colIdx < _columnLists.Count; colIdx++)
         {
+            int contentGridCol = colIdx * 2 + 1; // skip the drop zone column before it
             var colItems = _columnLists[colIdx];
 
             // Column header (shown when multiple columns exist)
@@ -202,7 +211,7 @@ public partial class LauncherItemsPage : Page
                     Margin = new Thickness(0, 0, 0, 4),
                 };
                 Grid.SetRow(headerText, 0);
-                Grid.SetColumn(headerText, colIdx);
+                Grid.SetColumn(headerText, contentGridCol);
                 ColumnsPanel.Children.Add(headerText);
             }
 
@@ -239,41 +248,47 @@ public partial class LauncherItemsPage : Page
             lv.DragItemsCompleted += ColumnListView_DragItemsCompleted;
 
             Grid.SetRow(lv, 1);
-            Grid.SetColumn(lv, colIdx);
+            Grid.SetColumn(lv, contentGridCol);
             ColumnsPanel.Children.Add(lv);
         }
 
-        // "New column" drop zone (visible during drag, to the right of all columns)
+        // Inter-column "new column" drop zones (between and after every column)
         if (!_isReadOnly)
         {
-            _newColumnDropZone = new Border
+            // Drop zones at positions 0, 1, ..., _columnLists.Count
+            // Grid columns: 0, 2, 4, ..., _columnLists.Count * 2
+            for (int z = 0; z <= _columnLists.Count; z++)
             {
-                AllowDrop = true,
-                MinWidth = 100,
-                CornerRadius = new CornerRadius(8),
-                BorderBrush = AccentBrush,
-                BorderThickness = new Thickness(0),
-                Background = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["SubtleFillColorTransparentBrush"],
-                Visibility = Visibility.Collapsed,
-                VerticalAlignment = VerticalAlignment.Stretch,
-                Child = new StackPanel
+                int gridCol = z * 2; // drop zone grid columns are 0, 2, 4, ...
+                var zone = new Border
                 {
-                    VerticalAlignment = VerticalAlignment.Center,
-                    HorizontalAlignment = HorizontalAlignment.Center,
-                    Spacing = 4,
-                    Children =
+                    AllowDrop = true,
+                    MinWidth = 48,
+                    CornerRadius = new CornerRadius(8),
+                    BorderBrush = AccentBrush,
+                    BorderThickness = new Thickness(0),
+                    Background = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["SubtleFillColorTransparentBrush"],
+                    Visibility = Visibility.Collapsed,
+                    VerticalAlignment = VerticalAlignment.Stretch,
+                    Tag = z, // insert position in _columnLists
+                    Child = new FontIcon
                     {
-                        new FontIcon { Glyph = "\uE710", FontSize = 16, Opacity = 0.6, HorizontalAlignment = HorizontalAlignment.Center },
-                        new TextBlock { Text = "New\nColumn", FontSize = 12, Opacity = 0.6, TextAlignment = TextAlignment.Center },
-                    }
-                },
-            };
-            _newColumnDropZone.DragOver += NewColumnZone_DragOver;
-            _newColumnDropZone.Drop += NewColumnZone_Drop;
-            Grid.SetRow(_newColumnDropZone, 0);
-            Grid.SetRowSpan(_newColumnDropZone, 2);
-            Grid.SetColumn(_newColumnDropZone, _columnLists.Count);
-            ColumnsPanel.Children.Add(_newColumnDropZone);
+                        Glyph = "\uE710",
+                        FontSize = 14,
+                        Opacity = 0.5,
+                        VerticalAlignment = VerticalAlignment.Center,
+                        HorizontalAlignment = HorizontalAlignment.Center,
+                    },
+                };
+                zone.DragOver += NewColumnZone_DragOver;
+                zone.DragLeave += NewColumnZone_DragLeave;
+                zone.Drop += NewColumnZone_Drop;
+                Grid.SetRow(zone, 0);
+                Grid.SetRowSpan(zone, 2);
+                Grid.SetColumn(zone, gridCol);
+                ColumnsPanel.Children.Add(zone);
+                _newColumnDropZones.Add(zone);
+            }
         }
     }
 
@@ -300,7 +315,7 @@ public partial class LauncherItemsPage : Page
     private static ItemsPanelTemplate CreateWrapGridItemsPanel()
     {
         var xaml = "<ItemsPanelTemplate xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation'>" +
-                   "<ItemsWrapGrid Orientation='Horizontal' MaximumRowsOrColumns='10'/>" +
+                   "<ItemsWrapGrid Orientation='Horizontal' MaximumRowsOrColumns='3'/>" +
                    "</ItemsPanelTemplate>";
         return (ItemsPanelTemplate)Microsoft.UI.Xaml.Markup.XamlReader.Load(xaml);
     }
@@ -417,7 +432,7 @@ public partial class LauncherItemsPage : Page
             _dragItem = item;
             _dragSourceCollection = _columnLists[colIdx];
             e.Data.RequestedOperation = global::Windows.ApplicationModel.DataTransfer.DataPackageOperation.Move;
-            ShowNewColumnDropZone();
+            ShowNewColumnDropZones();
         }
     }
 
@@ -458,7 +473,7 @@ public partial class LauncherItemsPage : Page
     private void ColumnListView_Drop(object sender, DragEventArgs e)
     {
         ClearInsertionIndicator();
-        HideNewColumnDropZone();
+        HideNewColumnDropZones();
         if (_dragItem == null || _dragSourceCollection == null) return;
         if (sender is not ListView lv || lv.Tag is not int colIdx) return;
 
@@ -490,7 +505,7 @@ public partial class LauncherItemsPage : Page
     private void ColumnListView_DragItemsCompleted(ListViewBase sender, DragItemsCompletedEventArgs args)
     {
         ClearInsertionIndicator();
-        HideNewColumnDropZone();
+        HideNewColumnDropZones();
         TopLevelDropZone.Visibility = Visibility.Collapsed;
         _dragItem = null;
         _dragSourceCollection = null;
@@ -1016,7 +1031,7 @@ public partial class LauncherItemsPage : Page
             // Show the top-level drop zone so the user can pull items out of groups.
             TopLevelDropZone.Visibility = Visibility.Visible;
             TopLevelDropZone.BorderThickness = new Thickness(2);
-            ShowNewColumnDropZone();
+            ShowNewColumnDropZones();
         }
     }
 
@@ -1064,7 +1079,7 @@ public partial class LauncherItemsPage : Page
     private void GroupChildList_Drop(object sender, DragEventArgs e)
     {
         ClearInsertionIndicator();
-        HideNewColumnDropZone();
+        HideNewColumnDropZones();
         if (sender is not ListView lv || lv.Tag is not LauncherItem group) return;
         if (_dragItem == null || _dragSourceCollection == null || _dragItem.IsGroup || _dragItem.IsColumnBreak) return;
 
@@ -1096,7 +1111,7 @@ public partial class LauncherItemsPage : Page
     private void GroupChildList_DragItemsCompleted(ListViewBase sender, DragItemsCompletedEventArgs args)
     {
         ClearInsertionIndicator();
-        HideNewColumnDropZone();
+        HideNewColumnDropZones();
         TopLevelDropZone.Visibility = Visibility.Collapsed;
         _dragItem = null;
         _dragSourceCollection = null;
@@ -1121,7 +1136,7 @@ public partial class LauncherItemsPage : Page
     private void TopLevelDropZone_Drop(object sender, DragEventArgs e)
     {
         ClearInsertionIndicator();
-        HideNewColumnDropZone();
+        HideNewColumnDropZones();
         if (_dragItem == null || _dragSourceCollection == null) return;
         // Only accept drops from group children
         if (_columnLists.Contains(_dragSourceCollection)) return;
@@ -1150,20 +1165,29 @@ public partial class LauncherItemsPage : Page
         e.DragUIOverride.IsCaptionVisible = true;
         e.DragUIOverride.IsGlyphVisible = true;
         e.DragUIOverride.Caption = "New column";
-        if (_newColumnDropZone != null)
-            _newColumnDropZone.BorderThickness = new Thickness(2);
+        if (sender is Border zone)
+            zone.BorderThickness = new Thickness(2);
         e.Handled = true;
+    }
+
+    private void NewColumnZone_DragLeave(object sender, DragEventArgs e)
+    {
+        if (sender is Border zone)
+            zone.BorderThickness = new Thickness(0);
     }
 
     private void NewColumnZone_Drop(object sender, DragEventArgs e)
     {
         if (_dragItem == null || _dragSourceCollection == null) return;
 
+        int insertAt = sender is Border zone && zone.Tag is int pos
+            ? pos : _columnLists.Count;
+
         _dragSourceCollection.Remove(_dragItem);
 
-        // Create new column with the dropped item
+        // Create new column with the dropped item at the specified position
         var newCol = new ObservableCollection<LauncherItem> { _dragItem };
-        _columnLists.Add(newCol);
+        _columnLists.Insert(insertAt, newCol);
 
         _dragItem = null;
         _dragSourceCollection = null;
@@ -1194,22 +1218,33 @@ public partial class LauncherItemsPage : Page
         return removed;
     }
 
-    private void ShowNewColumnDropZone()
+    private void ShowNewColumnDropZones()
     {
-        if (_newColumnDropZone != null)
+        foreach (var zone in _newColumnDropZones)
         {
-            _newColumnDropZone.Visibility = Visibility.Visible;
-            _newColumnDropZone.BorderThickness = new Thickness(0);
+            zone.Visibility = Visibility.Visible;
+            zone.BorderThickness = new Thickness(0);
         }
+        // Expand MaxWidth to accommodate visible drop zones so the view doesn't scroll
+        int dropZoneWidth = _newColumnDropZones.Count * 48;
+        bool isIconMode = TargetLauncher?.ViewMode != 1;
+        int colFixedWidth = isIconMode ? 265 : 280;
+        int totalColumnsWidth = _columnLists.Count * colFixedWidth + (_columnLists.Count > 1 ? (_columnLists.Count - 1) * 12 : 0) + 80;
+        RootGrid.MaxWidth = Math.Max(1000, totalColumnsWidth + dropZoneWidth);
     }
 
-    private void HideNewColumnDropZone()
+    private void HideNewColumnDropZones()
     {
-        if (_newColumnDropZone != null)
+        foreach (var zone in _newColumnDropZones)
         {
-            _newColumnDropZone.Visibility = Visibility.Collapsed;
-            _newColumnDropZone.BorderThickness = new Thickness(0);
+            zone.Visibility = Visibility.Collapsed;
+            zone.BorderThickness = new Thickness(0);
         }
+        // Restore normal MaxWidth
+        bool isIconMode = TargetLauncher?.ViewMode != 1;
+        int colFixedWidth = isIconMode ? 265 : 280;
+        int totalColumnsWidth = _columnLists.Count * colFixedWidth + (_columnLists.Count > 1 ? (_columnLists.Count - 1) * 12 : 0) + 80;
+        RootGrid.MaxWidth = Math.Max(1000, totalColumnsWidth);
     }
 
     // -- Insertion indicator helpers --

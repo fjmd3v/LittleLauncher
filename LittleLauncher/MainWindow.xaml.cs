@@ -243,7 +243,11 @@ public sealed partial class MainWindow : Window
                     DispatcherQueue.TryEnqueue(() => UpdateTrayIconVisibility(launcher));
                     break;
                 case nameof(Launcher.Name):
-                    DispatcherQueue.TryEnqueue(() => UpdateTrayIconTooltip(launcher));
+                    DispatcherQueue.TryEnqueue(() =>
+                    {
+                        UpdateTrayIconTooltip(launcher);
+                        EnsureFlyoutStartMenuShortcuts();
+                    });
                     break;
             }
         };
@@ -291,9 +295,27 @@ public sealed partial class MainWindow : Window
         _trayIcons.Clear();
     }
 
-    private void ShowContextMenu(int x, int y)
+    private void ShowContextMenu(int x, int y, string? launcherId = null)
     {
         var popup = new H.NotifyIcon.Core.PopupMenu();
+
+        // "Edit Launcher" — drill into this launcher's items page
+        if (launcherId != null)
+        {
+            var launcher = SettingsManager.Current.Launchers.FirstOrDefault(l => l.Id == launcherId);
+            if (launcher != null)
+            {
+                var editItem = new H.NotifyIcon.Core.PopupMenuItem { Text = $"Edit {launcher.Name}" };
+                editItem.Click += (s, e) =>
+                {
+                    SettingsWindow.ShowInstance(this);
+                    var sw = SettingsWindow.GetCurrent();
+                    sw?.DispatcherQueue.TryEnqueue(() => sw.NavigateToLauncherItems(launcher));
+                };
+                popup.Items.Add(editItem);
+            }
+        }
+
         var settingsItem = new H.NotifyIcon.Core.PopupMenuItem { Text = "Settings" };
         settingsItem.Click += (s, e) => SettingsWindow.ShowInstance(this);
         popup.Items.Add(settingsItem);
@@ -365,29 +387,29 @@ public sealed partial class MainWindow : Window
     }
 
     /// <summary>
-    /// Preset icon PNG filenames (in Resources/AppIcons/).
+    /// Preset icon PNG filenames (in Resources/AppIcons/), keyed by TrayIconMode string.
     /// </summary>
-    private static readonly Dictionary<int, string> PresetIcons = new()
+    private static readonly Dictionary<string, string> PresetIcons = new()
     {
-        { 0, "Blue" },
-        { 1, "Green" },
-        { 2, "Teal" },
-        { 3, "Red" },
-        { 4, "Orange" },
-        { 5, "Purple" },
+        { TrayIconModes.Blue, "Blue" },
+        { TrayIconModes.Green, "Green" },
+        { TrayIconModes.Teal, "Teal" },
+        { TrayIconModes.Red, "Red" },
+        { TrayIconModes.Orange, "Orange" },
+        { TrayIconModes.Purple, "Purple" },
     };
 
     /// <summary>
-    /// Glyph preset icon characters (Segoe Fluent Icons).
+    /// Glyph preset icon characters (Segoe Fluent Icons), keyed by TrayIconMode string.
     /// </summary>
-    private static readonly Dictionary<int, (char Glyph, string Name)> GlyphPresets = new()
+    private static readonly Dictionary<string, (char Glyph, string Label)> GlyphPresets = new()
     {
-        { 6, ('\uE840', "Pin") },
-        { 7, ('\uE734', "Star") },
-        { 8, ('\uEB51', "Heart") },
-        { 9, ('\uE945', "Lightning") },
-        { 10, ('\uE721', "Search") },
-        { 11, ('\uE774', "Globe") },
+        { TrayIconModes.Pin, ('\uE840', "Pin") },
+        { TrayIconModes.Star, ('\uE734', "Star") },
+        { TrayIconModes.Heart, ('\uEB51', "Heart") },
+        { TrayIconModes.Lightning, ('\uE945', "Lightning") },
+        { TrayIconModes.Search, ('\uE721', "Search") },
+        { TrayIconModes.Globe, ('\uE774', "Globe") },
     };
 
     /// <summary>
@@ -396,12 +418,16 @@ public sealed partial class MainWindow : Window
     /// </summary>
     private static System.Drawing.Bitmap? ResolveBaseIconBitmap(Launcher launcher)
     {
-        int mode = launcher.TrayIconMode;
+        string mode = launcher.TrayIconMode;
 
         try
         {
-            // Custom user image (mode 12)
-            if (mode == 12)
+            // Composite mode — 2×2 grid of first 4 item icons
+            if (mode == TrayIconModes.Composite)
+                return RenderCompositeIconBitmap(launcher);
+
+            // Custom user image
+            if (mode == TrayIconModes.Custom)
             {
                 string path = launcher.CustomTrayIconPath;
                 if (!string.IsNullOrEmpty(path) && File.Exists(path))
@@ -416,17 +442,17 @@ public sealed partial class MainWindow : Window
                 }
             }
 
-            // Glyph presets (modes 6–11)
-            if (mode >= 6 && GlyphPresets.TryGetValue(mode, out var preset))
+            // Glyph presets
+            if (GlyphPresets.TryGetValue(mode, out var preset))
             {
                 bool dark = ThemeManager.IsDarkTheme();
                 var fg = dark ? System.Drawing.Color.White : System.Drawing.Color.Black;
                 return RenderGlyphBitmap(preset.Glyph, fg);
             }
 
-            // Color presets (modes 0–5)
+            // Color presets (fallback to Blue if unknown)
             if (!PresetIcons.TryGetValue(mode, out var name))
-                name = PresetIcons[0];
+                name = PresetIcons[TrayIconModes.Blue];
             string pngPath = Path.Combine(AppContext.BaseDirectory, "Resources", "AppIcons", $"{name}.png");
             if (File.Exists(pngPath))
             {
@@ -446,7 +472,14 @@ public sealed partial class MainWindow : Window
     /// </summary>
     private static System.Drawing.Bitmap RenderGlyphBitmap(char glyph, System.Drawing.Color fg)
     {
-        const int size = 256;
+        return RenderGlyphBitmap(glyph, fg, 256, 240f);
+    }
+
+    /// <summary>
+    /// Renders a Segoe Fluent Icons glyph at a specified size.
+    /// </summary>
+    private static System.Drawing.Bitmap RenderGlyphBitmap(char glyph, System.Drawing.Color fg, int size, float fontPx)
+    {
         var bitmap = new System.Drawing.Bitmap(size, size, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
         using (var g = System.Drawing.Graphics.FromImage(bitmap))
         {
@@ -454,7 +487,7 @@ public sealed partial class MainWindow : Window
             g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.HighQuality;
             g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAliasGridFit;
 
-            using var font = new System.Drawing.Font("Segoe Fluent Icons", 240f, System.Drawing.GraphicsUnit.Pixel);
+            using var font = new System.Drawing.Font("Segoe Fluent Icons", fontPx, System.Drawing.GraphicsUnit.Pixel);
             using var brush = new System.Drawing.SolidBrush(fg);
             using var fmt = new System.Drawing.StringFormat(System.Drawing.StringFormat.GenericTypographic);
             fmt.Alignment = System.Drawing.StringAlignment.Center;
@@ -462,6 +495,118 @@ public sealed partial class MainWindow : Window
             g.DrawString(glyph.ToString(), font, brush, new System.Drawing.RectangleF(0, 0, size, size), fmt);
         }
         return bitmap;
+    }
+
+    /// <summary>
+    /// Renders a 2×2 composite icon from the first 4 launchable items, similar to
+    /// how Windows 11 Start menu shows folder/group previews.
+    /// </summary>
+    private static System.Drawing.Bitmap? RenderCompositeIconBitmap(Launcher launcher)
+    {
+        const int canvasSize = 256;
+        const int cellSize = 124;  // each sub-icon cell
+        const int gap = 4;         // gap between cells
+
+        // Collect first 4 launchable items (flatten groups)
+        var items = new List<LauncherItem>();
+        CollectLaunchableItems(launcher.Items, items, 4);
+        if (items.Count == 0) return null;
+
+        // 2×2 grid positions, centered on canvas
+        int gridWidth = cellSize * 2 + gap;
+        int offsetX = (canvasSize - gridWidth) / 2;
+        int offsetY = (canvasSize - gridWidth) / 2;
+        var positions = new (int X, int Y)[]
+        {
+            (offsetX, offsetY),
+            (offsetX + cellSize + gap, offsetY),
+            (offsetX, offsetY + cellSize + gap),
+            (offsetX + cellSize + gap, offsetY + cellSize + gap),
+        };
+
+        bool dark = ThemeManager.IsDarkTheme();
+        var bitmap = new System.Drawing.Bitmap(canvasSize, canvasSize, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+        using var g = System.Drawing.Graphics.FromImage(bitmap);
+        g.Clear(System.Drawing.Color.Transparent);
+        g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.HighQuality;
+        g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
+
+        for (int i = 0; i < Math.Min(items.Count, 4); i++)
+        {
+            var item = items[i];
+            var pos = positions[i];
+
+            // Try to load the item's icon
+            System.Drawing.Bitmap? subIcon = null;
+            try
+            {
+                if (!string.IsNullOrEmpty(item.IconPath) && File.Exists(item.IconPath))
+                {
+                    if (item.IconPath.EndsWith(".ico", StringComparison.OrdinalIgnoreCase))
+                    {
+                        using var ico = new System.Drawing.Icon(item.IconPath, 64, 64);
+                        subIcon = new System.Drawing.Bitmap(ico.ToBitmap(), cellSize, cellSize);
+                    }
+                    else
+                    {
+                        using var orig = new System.Drawing.Bitmap(item.IconPath);
+                        subIcon = new System.Drawing.Bitmap(orig, cellSize, cellSize);
+                    }
+                }
+                else if (!string.IsNullOrEmpty(item.IconGlyph) && item.IconGlyph.Length > 0)
+                {
+                    var fg = dark ? System.Drawing.Color.White : System.Drawing.Color.Black;
+                    subIcon = RenderGlyphBitmap(item.IconGlyph[0], fg, cellSize, cellSize * 0.8f);
+                }
+            }
+            catch { /* best-effort */ }
+
+            if (subIcon == null) continue;
+
+            using (subIcon)
+            {
+                g.DrawImage(subIcon,
+                    new System.Drawing.Rectangle(pos.X, pos.Y, cellSize, cellSize),
+                    new System.Drawing.Rectangle(0, 0, subIcon.Width, subIcon.Height),
+                    System.Drawing.GraphicsUnit.Pixel);
+            }
+        }
+
+        return bitmap;
+    }
+
+    /// <summary>
+    /// Collects the first N launchable (non-group, non-heading, non-column-break) items,
+    /// flattening groups.
+    /// </summary>
+    private static void CollectLaunchableItems(IEnumerable<LauncherItem> source, List<LauncherItem> result, int max)
+    {
+        foreach (var item in source)
+        {
+            if (result.Count >= max) return;
+            if (item.IsColumnBreak) continue;
+            if (item.IsGroup)
+            {
+                CollectLaunchableItems(item.Children, result, max);
+                continue;
+            }
+            // Headings have no Path and aren't launchable
+            if (string.IsNullOrEmpty(item.Path)) continue;
+            result.Add(item);
+        }
+    }
+
+    /// <summary>Creates a GraphicsPath for a rounded rectangle.</summary>
+    private static System.Drawing.Drawing2D.GraphicsPath RoundedRectPath(int x, int y, int w, int h, int r)
+    {
+        var path = new System.Drawing.Drawing2D.GraphicsPath();
+        int d = r * 2;
+        path.AddArc(x, y, d, d, 180, 90);
+        path.AddArc(x + w - d, y, d, d, 270, 90);
+        path.AddArc(x + w - d, y + h - d, d, d, 0, 90);
+        path.AddArc(x, y + h - d, d, d, 90, 90);
+        path.CloseFigure();
+        return path;
     }
 
     /// <summary>
@@ -579,6 +724,14 @@ public sealed partial class MainWindow : Window
     }
 
     /// <summary>
+    /// Ensures the per-launcher .ico file exists in AppData. Called before
+    /// pinning to the taskbar so the companion exe and Start Menu shortcut
+    /// can reference the correct icon.
+    /// </summary>
+    internal static void EnsureLauncherIconSaved(Launcher launcher) =>
+        SaveResolvedIconToAppData(launcher);
+
+    /// <summary>
     /// Persists a launcher's resolved icon as an .ico file in AppData so that
     /// shortcuts (Start Menu, pinned taskbar) can reference it.
     /// Returns the path to the saved .ico, or null on failure.
@@ -619,7 +772,7 @@ public sealed partial class MainWindow : Window
     }
 
     /// <summary>
-    /// Generates a settings-specific icon by compositing the first launcher's icon
+    /// Generates a settings-specific icon by compositing the app's blue rocket icon
     /// with a small gear overlay in the bottom-right corner.
     /// Saved as settings-icon.ico alongside app-icon.ico.
     /// </summary>
@@ -631,11 +784,11 @@ public sealed partial class MainWindow : Window
             Directory.CreateDirectory(appDataDir);
             string icoPath = Path.Combine(appDataDir, "settings-icon.ico");
 
-            // Derive from the first launcher's icon
-            var firstLauncher = SettingsManager.Current.Launchers.FirstOrDefault();
-            using var baseBitmap = firstLauncher != null
-                ? ResolveBaseIconBitmap(firstLauncher)
-                : null;
+            // Always use the blue rocket (app identity) as the base icon
+            string bluePng = Path.Combine(AppContext.BaseDirectory, "Resources", "AppIcons", "Blue.png");
+            if (!File.Exists(bluePng)) return null;
+            using var original = new System.Drawing.Bitmap(bluePng);
+            using var baseBitmap = TrimAndResizeTo256(original);
             if (baseBitmap == null) return null;
 
             // Draw gear overlay in the bottom-right corner
@@ -893,7 +1046,8 @@ public sealed partial class MainWindow : Window
                 {
                     GetCursorPos(out var pt);
                     int cx = pt.X, cy = pt.Y;
-                    DispatcherQueue.TryEnqueue(() => ShowContextMenu(cx, cy));
+                    string lid = targetLauncherId;
+                    DispatcherQueue.TryEnqueue(() => ShowContextMenu(cx, cy, lid));
                 }
             }
             return IntPtr.Zero;
@@ -968,13 +1122,14 @@ public sealed partial class MainWindow : Window
                 catch { /* best-effort */ }
             }
 
-            // Single Start Menu shortcut — always opens settings when clicked
+            // Single Start Menu shortcut — always opens settings when clicked.
+            // Always use the exe's embedded icon (blue rocket) for the app identity.
             CreateOrUpdateShortcut(
                 Path.Combine(startMenuDir, "Little Launcher.lnk"),
                 exePath,
                 "--settings",
                 "Little Launcher",
-                GetShortcutIconLocation($"{exePath},0"));
+                $"{exePath},0");
         }
         catch (Exception ex)
         {
@@ -1006,26 +1161,20 @@ public sealed partial class MainWindow : Window
             string flyoutExe = Path.Combine(GetPhysicalAppDataDir(), "LittleLauncherFlyout.exe");
             if (!File.Exists(flyoutExe)) return;
 
-            // Collect IDs of current launchers so we can remove stale shortcuts.
+            // Build a set of expected shortcut filenames so we can detect
+            // renamed launchers and remove their old shortcuts.
+            var expectedNames = new HashSet<string>(
+                SettingsManager.Current.Launchers.Select(l =>
+                    $"Little Launcher Flyout - {SanitizeForFileName(l.Name)}.lnk"),
+                StringComparer.OrdinalIgnoreCase);
+
             var currentIds = new HashSet<string>(
                 SettingsManager.Current.Launchers.Select(l => l.Id),
                 StringComparer.OrdinalIgnoreCase);
 
-            // Remove stale flyout shortcuts whose launcher no longer exists.
-            foreach (var lnk in Directory.GetFiles(startMenuDir, "Little Launcher Flyout *.lnk"))
-            {
-                if (IsFlyoutShortcut(lnk))
-                {
-                    // Keep it only if its arguments contain a current launcher ID.
-                    bool keep = currentIds.Any(id => ShortcutContainsArg(lnk, id));
-                    if (!keep)
-                    {
-                        try { File.Delete(lnk); } catch { }
-                    }
-                }
-            }
-
-            // Create/update one shortcut per launcher.
+            // Create/update one shortcut per launcher FIRST, so the new shortcut
+            // (with the same AUMID) exists before we delete the old one.
+            // This prevents taskbar pins from being dropped during renames.
             foreach (var launcher in SettingsManager.Current.Launchers)
             {
                 string iconPath = Path.Combine(GetPhysicalAppDataDir(), $"app-icon-{launcher.Id}.ico");
@@ -1046,7 +1195,33 @@ public sealed partial class MainWindow : Window
                 // Stamp the AUMID so the shell matches this shortcut to the
                 // running companion exe when the user pins it.
                 SetShortcutAppUserModelId(lnkPath, $"LittleLauncher.Flyout.{launcher.Id}");
+
+                // Notify the shell about this specific shortcut so it re-reads
+                // the AUMID property before the companion exe is launched.
+                NotifyShellItemUpdated(lnkPath);
             }
+
+            // Now remove stale flyout shortcuts: deleted launchers OR renamed ones.
+            foreach (var lnk in Directory.GetFiles(startMenuDir, "Little Launcher Flyout *.lnk"))
+            {
+                if (IsFlyoutShortcut(lnk))
+                {
+                    string fileName = Path.GetFileName(lnk);
+                    bool isExpected = expectedNames.Contains(fileName);
+                    bool hasValidId = currentIds.Any(id => ShortcutContainsArg(lnk, id));
+                    // Delete if the launcher was removed OR the shortcut name is stale (renamed)
+                    if (!hasValidId || !isExpected)
+                    {
+                        try { File.Delete(lnk); } catch { }
+                    }
+                }
+            }
+
+            // Broadcast a global association change so the shell re-indexes
+            // all shortcut AUMIDs.  Uses SHCNF_FLUSH for synchronous processing
+            // — the call blocks until the shell has handled the notification,
+            // ensuring the companion exe's AUMID will match correctly.
+            SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST | SHCNF_FLUSH, IntPtr.Zero, IntPtr.Zero);
         }
         catch (Exception ex)
         {
@@ -1179,15 +1354,8 @@ public sealed partial class MainWindow : Window
                 Environment.GetFolderPath(Environment.SpecialFolder.StartMenu),
                 "Programs");
 
-            // Update the main app shortcut (unpackaged/WiX only — MSIX uses manifest entry)
-            string mainLnk = Path.Combine(startMenuDir, "Little Launcher.lnk");
-            if (File.Exists(mainLnk))
-            {
-                UpdateShortcutIconLocation(mainLnk, mainIconLocation);
-                NotifyShellItemUpdated(mainLnk);
-            }
-
             // Update per-launcher Start Menu flyout shortcuts
+            // (The main app shortcut always uses the embedded exe icon, so skip it.)
             foreach (string lnk in Directory.GetFiles(startMenuDir, "Little Launcher Flyout *.lnk"))
             {
                 string? launcherId = GetFlyoutShortcutLauncherId(lnk);

@@ -2,6 +2,7 @@ using LittleLauncher.Classes.Settings;
 using LittleLauncher.Services;
 using LittleLauncher.ViewModels;
 using NLog;
+using System;
 using System.Diagnostics;
 using System.IO;
 using Microsoft.UI.Xaml;
@@ -52,35 +53,12 @@ public partial class HomePage : Page
     }
 
     /// <summary>
-    /// Returns the best image source path for the current tray icon mode.
-    /// Prefers native PNG/image files over the generated ICO.
+    /// Returns the app icon source path — always the blue rocket PNG (app identity).
     /// </summary>
     private static string? ResolveAppIconSource()
     {
-        var firstLauncher = SettingsManager.Current.Launchers.Count > 0
-            ? SettingsManager.Current.Launchers[0] : null;
-        int mode = firstLauncher?.TrayIconMode ?? 0;
-
-        // Preset color icons (modes 0–5): load the source PNG directly
-        string[] presetNames = ["Blue", "Green", "Teal", "Red", "Orange", "Purple"];
-        if (mode >= 0 && mode < presetNames.Length)
-        {
-            string png = Path.Combine(AppContext.BaseDirectory, "Resources", "AppIcons", $"{presetNames[mode]}.png");
-            if (File.Exists(png)) return png;
-        }
-
-        // Custom icon (mode 12): load the user's original file
-        if (mode == 12)
-        {
-            string custom = firstLauncher?.CustomTrayIconPath ?? "";
-            if (!string.IsNullOrEmpty(custom) && File.Exists(custom))
-                return custom;
-        }
-
-        // Glyph presets and fallback: use the generated ICO
-        string ico = Path.Combine(
-            MainWindow.GetPhysicalAppDataDir(), "app-icon.ico");
-        return File.Exists(ico) ? ico : null;
+        string png = Path.Combine(AppContext.BaseDirectory, "Resources", "AppIcons", "Blue.png");
+        return File.Exists(png) ? png : null;
     }
 
     private async Task CheckForUpdateAsync()

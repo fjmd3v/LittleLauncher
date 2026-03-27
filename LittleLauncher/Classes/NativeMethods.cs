@@ -90,6 +90,34 @@ public static class NativeMethods
         public IntPtr bmBits;
     }
 
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct BITMAPINFOHEADER
+    {
+        public uint biSize;
+        public int biWidth;
+        public int biHeight;  // positive = bottom-up, negative = top-down
+        public ushort biPlanes;
+        public ushort biBitCount;
+        public uint biCompression;
+        public uint biSizeImage;
+        public int biXPelsPerMeter;
+        public int biYPelsPerMeter;
+        public uint biClrUsed;
+        public uint biClrImportant;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct DIBSECTION
+    {
+        public BITMAP dsBm;
+        public BITMAPINFOHEADER dsBmih;
+        public uint dsBitfields0;
+        public uint dsBitfields1;
+        public uint dsBitfields2;
+        public IntPtr dshSection;
+        public uint dsOffset;
+    }
+
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Auto)]
     internal struct MONITORINFOEX
     {
@@ -285,6 +313,9 @@ public static class NativeMethods
 
     [DllImport("gdi32.dll")]
     internal static extern int GetObject(IntPtr hgdiobj, int cbBuffer, out BITMAP lpvObject);
+
+    [DllImport("gdi32.dll", EntryPoint = "GetObject")]
+    internal static extern int GetObjectDibSection(IntPtr hgdiobj, int cbBuffer, out DIBSECTION lpvObject);
 
     #endregion
 

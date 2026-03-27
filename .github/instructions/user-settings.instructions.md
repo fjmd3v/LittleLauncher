@@ -44,9 +44,11 @@ applyTo: "{**/ViewModels/UserSettings*.cs,**/Models/Launcher.cs}"
 `UserSettings.Launchers` is an `ObservableCollection<Launcher>`. Each `Launcher` holds:
 - `Id` (GUID string, readonly key)
 - `Name` (`[ObservableProperty]`)
-- `TrayIconMode` (`[ObservableProperty]`, same mode values as the old global `TrayIconMode`)
+- `TrayIconMode` (`[ObservableProperty]`, `string` — uses `TrayIconModes` constants like `\"Composite\"`, `\"Blue\"`, etc. A `TrayIconModeJsonConverter` handles migration from legacy integer values)
 - `CustomTrayIconPath` (`[ObservableProperty]`)
 - `NIconHide` (`[ObservableProperty]`)
+- `ViewMode` (`[ObservableProperty]`)
+- `ShowTitle` (`[ObservableProperty]`, shows launcher name at top of flyout)
 - `Items: ObservableCollection<LauncherItem>`
 
 ### Sharing Properties (plain auto-properties, not `[ObservableProperty]`)
@@ -59,7 +61,7 @@ applyTo: "{**/ViewModels/UserSettings*.cs,**/Models/Launcher.cs}"
 - `SharedSftpRemotePath` — legacy migration-only setter that populates `SharedPath` + sets SFTP mode on deserialization
 - `IsFileSync`, `IsSftpSync` — `[JsonIgnore]` convenience properties derived from `SharedSyncMode`
 
-**Migration**: On first run with old settings, `CompleteInitialization()` checks `Launchers.Count == 0` and migrates `LauncherItems` + `TrayIconMode`/`NIconHide`/`CustomTrayIconPath` into a "Default" launcher. The legacy properties remain in the schema but are not observable. On first load, migrates from legacy `settings.xml` to `settings.json`.
+**Migration**: On first run with old settings, `CompleteInitialization()` checks `Launchers.Count == 0` and migrates `LauncherItems` + `TrayIconMode`/`NIconHide`/`CustomTrayIconPath` into a "Default" launcher (legacy int `TrayIconMode` is converted via `TrayIconModes.FromLegacyInt()`). The legacy properties remain in the schema but are not observable. On first load, migrates from legacy `settings.xml` to `settings.json`. The `TrayIconModeJsonConverter` on `Launcher.TrayIconMode` also handles reading legacy integer values from old JSON files.
 
 **Do not** add `[ObservableProperty]` to the legacy migration fields (`LauncherItems`, `TrayIconMode`, `NIconHide`, `CustomTrayIconPath` on `UserSettings`) — they are plain migration-only properties marked with `[JsonIgnore]`.
 

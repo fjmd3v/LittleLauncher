@@ -4,9 +4,57 @@
 using CommunityToolkit.Mvvm.ComponentModel;
 using System;
 using System.Collections.ObjectModel;
+using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace LittleLauncher.Models;
+
+/// <summary>String constants for <see cref="Launcher.TrayIconMode"/>.</summary>
+public static class TrayIconModes
+{
+    public const string Blue = "Blue";
+    public const string Green = "Green";
+    public const string Teal = "Teal";
+    public const string Red = "Red";
+    public const string Orange = "Orange";
+    public const string Purple = "Purple";
+    public const string Pin = "Pin";
+    public const string Star = "Star";
+    public const string Heart = "Heart";
+    public const string Lightning = "Lightning";
+    public const string Search = "Search";
+    public const string Globe = "Globe";
+    public const string Custom = "Custom";
+    public const string Composite = "Composite";
+
+    /// <summary>Maps legacy integer TrayIconMode values to string constants.</summary>
+    internal static string FromLegacyInt(int mode) => mode switch
+    {
+        0 => Blue, 1 => Green, 2 => Teal, 3 => Red, 4 => Orange, 5 => Purple,
+        6 => Pin, 7 => Star, 8 => Heart, 9 => Lightning, 10 => Search, 11 => Globe,
+        12 => Custom, 13 => Composite,
+        _ => Blue,
+    };
+}
+
+/// <summary>
+/// Reads TrayIconMode as a string. If the JSON token is a number (legacy format),
+/// converts it via <see cref="TrayIconModes.FromLegacyInt"/>.
+/// </summary>
+public class TrayIconModeJsonConverter : JsonConverter<string>
+{
+    public override string Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+    {
+        if (reader.TokenType == JsonTokenType.Number)
+            return TrayIconModes.FromLegacyInt(reader.GetInt32());
+        return reader.GetString() ?? TrayIconModes.Blue;
+    }
+
+    public override void Write(Utf8JsonWriter writer, string value, JsonSerializerOptions options)
+    {
+        writer.WriteStringValue(value);
+    }
+}
 
 /// <summary>
 /// Represents a named launcher: a set of launcher items with their own tray icon
@@ -26,13 +74,14 @@ public partial class Launcher : ObservableObject
 
     /// <summary>
     /// Tray icon style for this launcher.
-    /// 0-5 = Color rockets (Blue/Green/Teal/Red/Orange/Purple),
-    /// 6-11 = Glyphs (Pin/Star/Heart/Lightning/Search/Globe), 12 = Custom image.
+    /// Use <see cref="TrayIconModes"/> constants: "Blue", "Green", "Teal", "Red", "Orange", "Purple",
+    /// "Pin", "Star", "Heart", "Lightning", "Search", "Globe", "Custom", "Composite".
     /// </summary>
     [ObservableProperty]
-    public partial int TrayIconMode { get; set; }
+    [JsonConverter(typeof(TrayIconModeJsonConverter))]
+    public partial string TrayIconMode { get; set; } = TrayIconModes.Composite;
 
-    /// <summary>Path to a custom tray icon file (.ico or .png) when TrayIconMode is 12 (Custom).</summary>
+    /// <summary>Path to a custom tray icon file (.ico or .png) when TrayIconMode is "Custom".</summary>
     [ObservableProperty]
     public partial string CustomTrayIconPath { get; set; } = "";
 
@@ -46,6 +95,10 @@ public partial class Launcher : ObservableObject
     /// </summary>
     [ObservableProperty]
     public partial int ViewMode { get; set; }
+
+    /// <summary>When true, the launcher name is shown at the top of the flyout popup.</summary>
+    [ObservableProperty]
+    public partial bool ShowTitle { get; set; }
 
     /// <summary>
     /// The launcher items (shortcuts, groups, headings, column breaks) in this launcher.
@@ -125,7 +178,7 @@ public partial class Launcher : ObservableObject
     public Launcher()
     {
         Name = "Launcher";
-        TrayIconMode = 0;
+        TrayIconMode = TrayIconModes.Composite;
         CustomTrayIconPath = "";
         NIconHide = false;
         Items = [];

@@ -1,6 +1,7 @@
 using LittleLauncher.Classes.Settings;
 using LittleLauncher.Models;
 using LittleLauncher.Pages;
+using LittleLauncher.Services;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
@@ -341,5 +342,7 @@ public sealed partial class SettingsWindow : Window
         SettingsManager.SaveSettings();
         // Refresh tray icons in case launchers were added, removed, or renamed
         MainWindow.Current?.RefreshTrayIcons();
+        // Sync to SFTP so the server has the latest settings
+        AutoSyncService.NotifyItemsChanged();
     }
 }

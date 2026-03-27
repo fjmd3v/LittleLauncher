@@ -208,7 +208,7 @@
                                   DragItemsCompleted="GroupChildList_DragItemsCompleted">
                             <ListView.ItemsPanel>
                                 <ItemsPanelTemplate>
-                                    <ItemsWrapGrid Orientation="Horizontal" MaximumRowsOrColumns="10"/>
+                                    <ItemsWrapGrid Orientation="Horizontal" MaximumRowsOrColumns="3"/>
                                 </ItemsPanelTemplate>
                             </ListView.ItemsPanel>
                             <ListView.ItemTemplate>
@@ -253,7 +253,7 @@
                       DragItemsCompleted="GroupChildList_DragItemsCompleted">
                 <ListView.ItemsPanel>
                     <ItemsPanelTemplate>
-                        <ItemsWrapGrid Orientation="Horizontal" MaximumRowsOrColumns="10"/>
+                        <ItemsWrapGrid Orientation="Horizontal" MaximumRowsOrColumns="3"/>
                     </ItemsPanelTemplate>
                 </ListView.ItemsPanel>
                 <ListView.ItemTemplate>

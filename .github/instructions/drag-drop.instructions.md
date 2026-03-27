@@ -24,6 +24,7 @@ The settings page renders launcher items in a multi-column Grid (`ColumnsPanel`)
 | Column items | Per-column ListView (Tag = column index) | `_columnLists[colIdx]` | Supports cross-column drag-drop |
 | Group children | `GroupChildList` (inside DataTemplate) | `group.Children` | Rejects `IsGroup` drops (groups can't nest) |
 | Top-level drop zone | `TopLevelDropZone` (Border) | — | Appears only when dragging FROM a group; drops append to last column |
+| Inter-column drop zones | `_newColumnDropZones` (List\<Border\>) | — | Appear during any drag; one between each pair of columns plus one at each end. Tag = insert position in `_columnLists`. Dropping creates a new column at that position. |
 
 ### Shared state fields
 

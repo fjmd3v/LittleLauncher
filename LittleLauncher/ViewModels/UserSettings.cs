@@ -191,7 +191,7 @@ public partial class UserSettings : ObservableObject
                 Id = Guid.NewGuid().ToString(),
                 Name = "Default",
                 // Carry over global icon settings from the legacy fields
-                TrayIconMode = TrayIconMode,
+                TrayIconMode = TrayIconModes.FromLegacyInt(TrayIconMode),
                 CustomTrayIconPath = CustomTrayIconPath,
                 NIconHide = NIconHide,
             };

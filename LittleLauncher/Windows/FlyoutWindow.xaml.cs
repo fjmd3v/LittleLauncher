@@ -219,6 +219,8 @@ public partial class FlyoutWindow : Window
         if (items == null || items.Count == 0) return 0;
         var hash = new HashCode();
         hash.Add(launcher.ViewMode);
+        hash.Add(launcher.ShowTitle);
+        hash.Add(launcher.Name);
         foreach (var item in items)
         {
             HashItem(ref hash, item);
@@ -445,6 +447,18 @@ public partial class FlyoutWindow : Window
     private void RebuildColumnsPanel()
     {
         ColumnsPanel.Children.Clear();
+
+        // Show/hide launcher title at the top
+        if (_launcher.ShowTitle)
+        {
+            LauncherTitle.Text = _launcher.Name;
+            LauncherTitle.Visibility = Visibility.Visible;
+        }
+        else
+        {
+            LauncherTitle.Visibility = Visibility.Collapsed;
+        }
+
         foreach (var col in BuildColumnLists())
         {
             if (_launcher.ViewMode != 1)
@@ -483,6 +497,10 @@ public partial class FlyoutWindow : Window
                 fw._lastItemsHash = -1;
                 fw.RebuildItemsIfNeeded();
             }
+            // Refresh composite tray icon (mode 13) since it derives from item icons
+            var launcher = SettingsManager.Current.Launchers.FirstOrDefault(l => l.Id == launcherId);
+            if (launcher?.TrayIconMode == TrayIconModes.Composite)
+                MainWindow.Current?.UpdateTrayIcon(launcher);
         }
         else
         {
@@ -490,6 +508,12 @@ public partial class FlyoutWindow : Window
             {
                 fw._lastItemsHash = -1;
                 fw.RebuildItemsIfNeeded();
+            }
+            // Refresh all composite tray icons
+            foreach (var launcher in SettingsManager.Current.Launchers)
+            {
+                if (launcher.TrayIconMode == TrayIconModes.Composite)
+                    MainWindow.Current?.UpdateTrayIcon(launcher);
             }
         }
     }
@@ -1020,8 +1044,9 @@ public partial class FlyoutWindow : Window
 
         // Add a small buffer to cover accumulated sub-pixel font-height rounding.
         // Clamp to the available work-area height so the flyout never exceeds the screen.
+        double titleHeight = _launcher.ShowTitle ? 24 : 0;
         double maxContentHeight = GetWorkAreaHeightDips() - 16; // 16 = gap from taskbar edges
-        _lastMeasuredHeight = Math.Clamp(maxColumnHeight + 2, 80, maxContentHeight);
+        _lastMeasuredHeight = Math.Clamp(maxColumnHeight + titleHeight + 2, 80, maxContentHeight);
         return _lastMeasuredHeight;
     }
 
@@ -1077,8 +1102,9 @@ public partial class FlyoutWindow : Window
         }
 
         maxColumnHeight = Math.Max(maxColumnHeight, currentColumnHeight);
+        double titleHeight = _launcher.ShowTitle ? 24 : 0;
         double maxContentHeight = GetWorkAreaHeightDips() - 16;
-        _lastMeasuredHeight = Math.Clamp(maxColumnHeight + 2, 80, maxContentHeight);
+        _lastMeasuredHeight = Math.Clamp(maxColumnHeight + titleHeight + 2, 80, maxContentHeight);
         return _lastMeasuredHeight;
     }
 

@@ -479,28 +479,69 @@ internal static partial class FaviconService
                 if (hr != 0 || hBitmap == IntPtr.Zero)
                     return null;
 
-                // GetObject retrieves the DIB pixel data pointer so we can
-                // copy it directly, preserving the alpha channel that
-                // Bitmap.FromHbitmap would discard.
+                // GetObject with DIBSECTION retrieves the BITMAPINFOHEADER
+                // whose biHeight sign tells us the row order:
+                //   positive = bottom-up (rows stored bottom-to-top)
+                //   negative = top-down  (rows stored top-to-bottom)
+                // The plain BITMAP struct always has positive bmHeight.
+                bool bottomUp;
+                int width, height;
+                if (NativeMethods.GetObjectDibSection(hBitmap,
+                    Marshal.SizeOf<NativeMethods.DIBSECTION>(), out var ds) > 0
+                    && ds.dsBmih.biSize >= 40)
+                {
+                    width = ds.dsBm.bmWidth;
+                    height = Math.Abs(ds.dsBmih.biHeight);
+                    bottomUp = ds.dsBmih.biHeight > 0;
+                }
+                else
+                {
+                    NativeMethods.GetObject(hBitmap,
+                        Marshal.SizeOf<NativeMethods.BITMAP>(), out var bm2);
+                    width = bm2.bmWidth;
+                    height = bm2.bmHeight;
+                    bottomUp = true; // assume bottom-up for plain DDBs
+                }
+
                 NativeMethods.GetObject(hBitmap,
                     Marshal.SizeOf<NativeMethods.BITMAP>(), out var bm);
 
                 if (bm.bmBits != IntPtr.Zero && bm.bmBitsPixel == 32)
                 {
-                    using var bmp = new Bitmap(bm.bmWidth, bm.bmHeight,
+                    using var bmp = new Bitmap(width, height,
                         System.Drawing.Imaging.PixelFormat.Format32bppPArgb);
-                    var rect = new Rectangle(0, 0, bm.bmWidth, bm.bmHeight);
+                    var rect = new Rectangle(0, 0, width, height);
                     var data = bmp.LockBits(rect,
                         System.Drawing.Imaging.ImageLockMode.WriteOnly,
                         System.Drawing.Imaging.PixelFormat.Format32bppPArgb);
                     try
                     {
-                        int byteCount = bm.bmHeight * data.Stride;
-                        unsafe
+                        int stride = width * 4;
+                        if (bottomUp)
                         {
-                            Buffer.MemoryCopy(
-                                (void*)bm.bmBits, (void*)data.Scan0,
-                                byteCount, byteCount);
+                            // DIB rows are bottom-to-top; copy row-by-row in reverse
+                            unsafe
+                            {
+                                byte* src = (byte*)bm.bmBits;
+                                byte* dst = (byte*)data.Scan0;
+                                for (int y = 0; y < height; y++)
+                                {
+                                    Buffer.MemoryCopy(
+                                        src + (height - 1 - y) * stride,
+                                        dst + y * data.Stride,
+                                        stride, stride);
+                                }
+                            }
+                        }
+                        else
+                        {
+                            int byteCount = height * data.Stride;
+                            unsafe
+                            {
+                                Buffer.MemoryCopy(
+                                    (void*)bm.bmBits, (void*)data.Scan0,
+                                    byteCount, byteCount);
+                            }
                         }
                     }
                     finally { bmp.UnlockBits(data); }
