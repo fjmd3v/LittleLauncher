@@ -149,11 +149,10 @@ public static class UpdateService
             // Launch a helper script that waits for this process to exit,
             // then runs the MSI installer. This avoids file-lock failures
             // when the installer tries to replace the running executable.
-            // The MSI is per-user (no elevation needed). A helper script
-            // waits for the app to exit before launching the installer.
+            // The MSI is per-user (no elevation needed). The WiX LaunchApp
+            // custom action handles restarting the app after install.
             int pid = Environment.ProcessId;
             string scriptPath = Path.Combine(tempDir, "install-update.cmd");
-            string exePath = Environment.ProcessPath!;
             string script = $"""
                 @echo off
                 echo Waiting for Little Launcher to exit...
@@ -165,8 +164,6 @@ public static class UpdateService
                 )
                 echo Installing update...
                 msiexec /i "{msiPath}" /passive
-                echo Launching Little Launcher...
-                start "" "{exePath}" --settings
                 """;
             await File.WriteAllTextAsync(scriptPath, script, cancellationToken);
 
