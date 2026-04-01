@@ -26,6 +26,7 @@
     .\build-msix.ps1
     .\build-msix.ps1 -Platform ARM64
     .\build-msix.ps1 -Platform x64 -Configuration Debug
+    .\build-msix.ps1 -NoSign              # Store upload (unsigned)
 #>
 param(
     [ValidateSet("x64", "ARM64")]
@@ -39,7 +40,11 @@ param(
     # cert instead of the dev self-signed cert. Required to satisfy Smart App Control.
     [string]$TrustedPfxPath = "",
 
-    [string]$TrustedPfxPassword = ""
+    [string]$TrustedPfxPassword = "",
+
+    # Skip signing entirely. Use for Microsoft Store uploads — the Store re-signs
+    # the package with its own certificate during ingestion.
+    [switch]$NoSign
 )
 
 $ErrorActionPreference = "Stop"
@@ -84,7 +89,9 @@ $msixVersion = if ($version -match '^\d+\.\d+\.\d+$') { "$version.0" } else { $v
 Write-Host "Version: $msixVersion (from Directory.Build.props)" -ForegroundColor Cyan
 
 # ── Signing certificate (auto-generate if missing) ─────────────────────────────
-if (-not (Test-Path $pfxFile)) {
+if ($NoSign) {
+    Write-Host "Skipping signing (Store upload mode)" -ForegroundColor Yellow
+} elseif (-not (Test-Path $pfxFile)) {
     Write-Host "Signing certificate not found — generating self-signed cert..." -ForegroundColor Yellow
     $cert = New-SelfSignedCertificate -Type Custom -Subject "CN=RyanEwen" `
         -KeyUsage DigitalSignature -FriendlyName "Little Launcher Dev" `
@@ -194,22 +201,24 @@ Remove-Item $priconfigFile -Force -ErrorAction SilentlyContinue
 # Smart App Control requires Authenticode signatures on all PE files from a
 # CA-trusted OV or EV code signing certificate.  Self-signed certs do NOT work.
 # Pass -TrustedPfxPath and -TrustedPfxPassword to enable this step.
-if (-not [string]::IsNullOrEmpty($TrustedPfxPath)) {
-    if (-not (Test-Path $TrustedPfxPath)) {
-        Write-Error "TrustedPfxPath not found: $TrustedPfxPath"
-        exit 1
+if (-not $NoSign) {
+    if (-not [string]::IsNullOrEmpty($TrustedPfxPath)) {
+        if (-not (Test-Path $TrustedPfxPath)) {
+            Write-Error "TrustedPfxPath not found: $TrustedPfxPath"
+            exit 1
+        }
+        Write-Host "`n=== Signing embedded executables (Authenticode) ===" -ForegroundColor Cyan
+        $exesToSign = Get-ChildItem $layoutDir -Filter "*.exe" -Recurse
+        foreach ($exe in $exesToSign) {
+            Write-Host "  Signing $($exe.Name) ..."
+            & $signtool sign /fd SHA256 /f $TrustedPfxPath /p $TrustedPfxPassword `
+                /tr http://timestamp.digicert.com /td SHA256 $exe.FullName
+            if ($LASTEXITCODE -ne 0) { Write-Error "signtool failed for $($exe.FullName)"; exit 1 }
+        }
+    } else {
+        Write-Warning "TrustedPfxPath not specified — executables will not be Authenticode-signed."
+        Write-Warning "Smart App Control may block the app. Use -TrustedPfxPath to sign with a CA-trusted cert."
     }
-    Write-Host "`n=== Signing embedded executables (Authenticode) ===" -ForegroundColor Cyan
-    $exesToSign = Get-ChildItem $layoutDir -Filter "*.exe" -Recurse
-    foreach ($exe in $exesToSign) {
-        Write-Host "  Signing $($exe.Name) ..."
-        & $signtool sign /fd SHA256 /f $TrustedPfxPath /p $TrustedPfxPassword `
-            /tr http://timestamp.digicert.com /td SHA256 $exe.FullName
-        if ($LASTEXITCODE -ne 0) { Write-Error "signtool failed for $($exe.FullName)"; exit 1 }
-    }
-} else {
-    Write-Warning "TrustedPfxPath not specified — executables will not be Authenticode-signed."
-    Write-Warning "Smart App Control may block the app. Use -TrustedPfxPath to sign with a CA-trusted cert."
 }
 
 # ── Step 5: Package ───────────────────────────────────────────────────────────
@@ -222,17 +231,21 @@ if (Test-Path $msixFile) { Remove-Item $msixFile -Force }
 if ($LASTEXITCODE -ne 0) { Write-Error "makeappx pack failed"; exit 1 }
 
 # ── Step 6: Sign ──────────────────────────────────────────────────────────────
-Write-Host "`n=== Signing MSIX ===" -ForegroundColor Cyan
-
-if (-not [string]::IsNullOrEmpty($TrustedPfxPath)) {
-    # Sign with the CA-trusted cert (satisfies Smart App Control)
-    & $signtool sign /fd SHA256 /f $TrustedPfxPath /p $TrustedPfxPassword `
-        /tr http://timestamp.digicert.com /td SHA256 $msixFile
+if ($NoSign) {
+    Write-Host "`n=== Skipping MSIX signing (Store upload) ===" -ForegroundColor Yellow
 } else {
-    # Fall back to the dev self-signed cert (suitable for local testing only)
-    & $signtool sign /fd SHA256 /a /f $pfxFile /p "LittleLauncher" $msixFile
+    Write-Host "`n=== Signing MSIX ===" -ForegroundColor Cyan
+
+    if (-not [string]::IsNullOrEmpty($TrustedPfxPath)) {
+        # Sign with the CA-trusted cert (satisfies Smart App Control)
+        & $signtool sign /fd SHA256 /f $TrustedPfxPath /p $TrustedPfxPassword `
+            /tr http://timestamp.digicert.com /td SHA256 $msixFile
+    } else {
+        # Fall back to the dev self-signed cert (suitable for local testing only)
+        & $signtool sign /fd SHA256 /a /f $pfxFile /p "LittleLauncher" $msixFile
+    }
+    if ($LASTEXITCODE -ne 0) { Write-Error "signtool sign failed"; exit 1 }
 }
-if ($LASTEXITCODE -ne 0) { Write-Error "signtool sign failed"; exit 1 }
 
 # ── Done ──────────────────────────────────────────────────────────────────────
 $size = [math]::Round((Get-Item $msixFile).Length / 1MB, 1)

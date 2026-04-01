@@ -5,18 +5,17 @@
   xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
   xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
   xmlns:desktop="http://schemas.microsoft.com/appx/manifest/desktop/windows10"
-  xmlns:uap3="http://schemas.microsoft.com/appx/manifest/uap/windows10/3"
   IgnorableNamespaces="uap rescap">
 
   <Identity
-    Name="RyanEwen.LittleLauncher"
-    Publisher="CN=RyanEwen"
+    Name="27766TechnicallyReal.LittleLauncher"
+    Publisher="CN=C21E6CEF-D0D1-4497-93F9-3718D054DA0E"
     Version="VERSION_PLACEHOLDER"
     ProcessorArchitecture="ARCH_PLACEHOLDER" />
 
   <Properties>
     <DisplayName>Little Launcher</DisplayName>
-    <PublisherDisplayName>RyanEwen</PublisherDisplayName>
+    <PublisherDisplayName>TechnicallyReal</PublisherDisplayName>
     <Logo>Images\StoreLogo.png</Logo>
   </Properties>
 
@@ -54,11 +53,6 @@
             Enabled="false"
             DisplayName="Little Launcher" />
         </desktop:Extension>
-        <uap3:Extension Category="windows.appExecutionAlias">
-          <uap3:AppExecutionAlias>
-            <desktop:ExecutionAlias Alias="LittleLauncherFlyout.exe" />
-          </uap3:AppExecutionAlias>
-        </uap3:Extension>
       </Extensions>
     </Application>
   </Applications>

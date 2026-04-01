@@ -61,7 +61,7 @@
             </Grid>
         </Border>
 
-        <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+        <Border x:Name="UpdateCard" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
                 BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
                 BorderThickness="1" CornerRadius="4" Padding="16" Margin="0,0,0,8">
             <Grid ColumnSpacing="16">

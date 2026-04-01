@@ -5,7 +5,7 @@
 <h1 align="center">Little Launcher</h1>
 
 <p align="center">
-  A Windows system-tray launcher with settings-sync capability, built with WinUI 3, Windows App SDK, and SSH/SFTP.
+  A Windows launcher with system-tray and taskbar icon support, settings-sync capability, built with WinUI 3, Windows App SDK, and SSH/SFTP.
 </p>
 
 <p align="center">
@@ -49,7 +49,7 @@
 
 ## Overview
 
-Little Launcher lives in the Windows system tray. Clicking the tray icon opens a flyout with app and website shortcuts. It also provides SSH/SFTP-based settings synchronisation so you can keep your launcher configuration in sync across machines.
+Little Launcher lives in the Windows system tray and/or taskbar. Clicking its icon opens a flyout with app and website shortcuts. It also provides SSH/SFTP-based settings synchronisation so you can keep your launcher configuration in sync across machines.
 
 **Key features:**
 

@@ -51,7 +51,7 @@
       <_FlyoutRid Condition="'$(Platform)' != 'ARM64'">win-x64</_FlyoutRid>
       <_FlyoutPublishDir>$(MSBuildThisFileDirectory)..\LauncherShortcut\bin\aot-publish\$(_FlyoutRid)\</_FlyoutPublishDir>
     </PropertyGroup>
-    <Exec Command="dotnet publish &quot;$(MSBuildThisFileDirectory)..\LauncherShortcut\LauncherShortcut.csproj&quot; -c Release -r $(_FlyoutRid) -o &quot;$(_FlyoutPublishDir)&quot;" />
+    <Exec Command="dotnet publish &quot;$(MSBuildThisFileDirectory)..\LauncherShortcut\LauncherShortcut.csproj&quot; -c Release -r $(_FlyoutRid) -p:Platform=$(Platform) -o &quot;$(_FlyoutPublishDir)&quot;" />
     <Copy SourceFiles="$(_FlyoutPublishDir)LittleLauncherFlyout.exe" DestinationFolder="$(OutputPath)" SkipUnchangedFiles="true" />
     <!-- Clean up stale managed files from previous Debug copies -->
     <Delete Files="$(OutputPath)LittleLauncherFlyout.dll;$(OutputPath)LittleLauncherFlyout.deps.json;$(OutputPath)LittleLauncherFlyout.runtimeconfig.json" Condition="Exists('$(OutputPath)LittleLauncherFlyout.dll')" />

@@ -26,7 +26,8 @@ public partial class HomePage : Page
         LoadAppIcon();
         VersionTextBlock.Text = SettingsManager.Current.LastKnownVersion;
         BuildTypeTextBlock.Text = GetBuildTypeLabel();
-        _ = CheckForUpdateAsync();
+        if (!MainWindow.IsPackaged)
+            _ = CheckForUpdateAsync();
     }
 
     private static string GetBuildTypeLabel()

@@ -13,6 +13,8 @@ public partial class AboutPage : Page
     public AboutPage()
     {
         InitializeComponent();
+        if (MainWindow.IsPackaged)
+            UpdateCard.Visibility = Visibility.Collapsed;
     }
 
     private async void CheckForUpdates_Click(object sender, RoutedEventArgs e)

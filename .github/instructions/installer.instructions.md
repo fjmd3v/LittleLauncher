@@ -1,6 +1,6 @@
 ---
-description: "Use when modifying the MSI installer (WiX), changing install paths, shortcuts, or upgrade behavior. Covers per-user install, Start Menu shortcut lifecycle, and common WiX pitfalls."
-applyTo: "**/Package.wxs,**/LittleLauncherSetup.wixproj,**/UpdateService.cs"
+description: "Use when modifying the MSI installer (WiX), MSIX packaging, changing install paths, shortcuts, or upgrade behavior. Covers per-user install, Start Menu shortcut lifecycle, MSIX Store builds, and common pitfalls."
+applyTo: "**/Package.wxs,**/LittleLauncherSetup.wixproj,**/UpdateService.cs,**/build-msix.ps1,**/Package.appxmanifest"
 ---
 
 # MSI Installer (WiX)

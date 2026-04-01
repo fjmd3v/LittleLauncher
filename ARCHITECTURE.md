@@ -116,7 +116,7 @@ At startup, `EnsureFlyoutShortcut()` copies the companion exe to `%AppData%\\Lit
 
 ## MSIX packaging
 
-`LittleLauncherMSIX/build-msix.ps1` produces a sideloadable MSIX package for Windows Store-like installation. Key details:
+`LittleLauncherMSIX/build-msix.ps1` produces an MSIX package for Microsoft Store distribution or sideloading. Key details:
 
 - **Publishes with `-p:WindowsPackageType=MSIX`** to suppress the unpackaged-only auto-bootstrapper (`MICROSOFT_WINDOWSAPPSDK_BOOTSTRAP_AUTO_INITIALIZE`), which fails in a packaged context.
 - **Declares `<PackageDependency>`** on `Microsoft.WindowsAppRuntime.1.8` so the framework package provides WinRT activation factories.
@@ -124,3 +124,5 @@ At startup, `EnsureFlyoutShortcut()` copies the companion exe to `%AppData%\\Lit
 - **Version and architecture** are stamped from `Directory.Build.props` into the manifest at build time (`VERSION_PLACEHOLDER`, `ARCH_PLACEHOLDER`).
 - **Image assets** in `LittleLauncherMSIX/Images/` use standard MRT naming qualifiers (e.g. `.scale-200.`, `.targetsize-48.`) and are indexed into `resources.pri` by `makepri`.
 - **Companion exe** is deployed to `%AppData%\\LittleLauncher\\` at startup for all build types. See \"Companion exe\" section above.
+- **`-NoSign` flag** skips all signing for Store uploads (Microsoft re-signs during ingestion). Without `-NoSign`, the script signs with a self-signed dev cert or a trusted PFX.
+- **Update checks and toast notifications** are disabled in MSIX builds — the Store handles updates. The GitHub-based update UI on Home/About pages is hidden.

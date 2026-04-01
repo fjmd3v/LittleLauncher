@@ -165,9 +165,16 @@ public sealed partial class MainWindow : Window
         _ = StartAutoSyncAsync();
         _ = FetchMissingIconsOnStartupAsync();
 
-        // Register for Windows toast notifications
-        Microsoft.Windows.AppNotifications.AppNotificationManager.Default.Register();
-        _ = CheckForUpdateOnStartupAsync();
+        // Register for Windows toast notifications (may fail in packaged/MSIX builds
+        // that lack a COM activator declaration — non-critical, only used for update toasts)
+        // Toast notifications + GitHub update checks are only for non-Store builds.
+        // The Store handles updates and doesn't support custom toast COM activation.
+        if (!IsPackaged)
+        {
+            try { Microsoft.Windows.AppNotifications.AppNotificationManager.Default.Register(); }
+            catch (Exception ex) { Logger.Warn(ex, "Toast notification registration failed"); }
+            _ = CheckForUpdateOnStartupAsync();
+        }
 
         // Tell Windows to include --silent when auto-restarting the app
         // (e.g. "Restart apps" after sign-in). Without this, Windows
@@ -1140,8 +1147,13 @@ public sealed partial class MainWindow : Window
     private static void EnsureStartMenuShortcuts()
     {
         // MSIX packages register their own Start Menu entry via the manifest.
-        // Creating a .lnk would duplicate it.
-        if (IsPackaged) return;
+        // Creating a .lnk would duplicate it. But per-launcher flyout shortcuts
+        // are still needed for pin-to-taskbar even in MSIX.
+        if (IsPackaged)
+        {
+            EnsureFlyoutStartMenuShortcuts();
+            return;
+        }
 
         try
         {
@@ -1198,8 +1210,6 @@ public sealed partial class MainWindow : Window
     /// </summary>
     internal static void EnsureFlyoutStartMenuShortcuts()
     {
-        if (IsPackaged) return;
-
         try
         {
             string startMenuDir = Path.Combine(
