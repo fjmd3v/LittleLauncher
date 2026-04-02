@@ -64,6 +64,7 @@ Release builds AOT-publish the companion exe (`LauncherShortcut`) automatically.
 - SSH.NET 2025.1.0
 - NLog 6.1.1
 - Microsoft.Data.Sqlite 9.0.3 (Firefox bookmark import from places.sqlite)
+- WixToolset.Util.wixext 5.0.2 (WiX util extension for installer close-application actions)
 
 ## Common tasks
 

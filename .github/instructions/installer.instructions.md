@@ -53,6 +53,8 @@ A `CustomAction` in `Package.wxs` launches `LittleLauncher.exe` after `InstallFi
 
 ## Uninstall cleanup
 
+Before file removal, WiX `util:CloseApplication` targets `LittleLauncher.exe` on `REMOVE="ALL"`. It sends a normal close message, then an end-session message, waits 5 seconds, and force-terminates the process if it is still running. This keeps explicit uninstalls and major-upgrade removal from racing the running tray process.
+
 On `REMOVE="ALL" AND NOT UPGRADINGPRODUCTCODE`, a `CustomAction` runs `cleanup-uninstall.ps1` (shipped in the install folder) via `powershell.exe -File`. The `NOT UPGRADINGPRODUCTCODE` condition ensures settings and data survive upgrades. It cleans up:
 
 | What | Where |
@@ -62,6 +64,6 @@ On `REMOVE="ALL" AND NOT UPGRADINGPRODUCTCODE`, a `CustomAction` runs `cleanup-u
 | Startup registry entry | `HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run\Little Launcher` |
 | Pinned taskbar shortcuts | Any `.lnk` in `User Pinned\TaskBar\` targeting `LittleLauncherFlyout.exe` |
 
-The action uses `Return="asyncNoWait"` so the installer doesn't block on PowerShell.
+The action uses `Return="check"` so the uninstall does not report completion until the cleanup script has finished.
 
 **MSIX limitation:** MSIX has no custom uninstall actions. When an MSIX package is removed, Windows deletes the package files, its own Start Menu entry, **and all VFS-redirected data** (settings, cached icons, companion exe) because the entire `%LocalAppData%\Packages\{PFN}\` tree is removed. Pinned taskbar shortcuts survive as dead `.lnk` files — Windows 11 eventually detects and offers to remove stale pins. Settings **do** survive MSIX upgrades — Windows preserves package data during version updates.

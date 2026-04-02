@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+  xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
 
   <!-- Version is injected by the build: -d ProductVersion=1.0.0.0 -->
   <?ifndef ProductVersion ?>
@@ -55,6 +56,19 @@
 
     <Icon Id="AppIcon" SourceFile="$(BuildOutputPath)\Resources\LittleLauncher.ico" />
 
+        <!-- Ensure the tray app is no longer running before Windows Installer
+          starts removing files. This applies to explicit uninstalls and the
+          uninstall phase of major upgrades. -->
+        <util:CloseApplication Id="CloseLittleLauncher"
+                Target="LittleLauncher.exe"
+                Description="Little Launcher must close before setup can continue."
+                CloseMessage="yes"
+                EndSessionMessage="yes"
+                Timeout="5"
+                RebootPrompt="no"
+                TerminateProcess="0"
+                Condition="REMOVE=&quot;ALL&quot;" />
+
     <!-- Launch the app after install or upgrade (not on uninstall or repair) -->
     <CustomAction Id="LaunchApp"
                   Directory="INSTALLFOLDER"
@@ -66,13 +80,14 @@
          shortcuts on uninstall. The app writes to %AppData%\LittleLauncher\
          (settings, companion exe, icons), creates .lnk files in the Start Menu
          and pinned taskbar directory, and registers a startup Run key — none
-         of which are tracked by the MSI. See cleanup-uninstall.ps1 for the
-         full script. asyncNoWait so the installer doesn't block on PowerShell. -->
+          of which are tracked by the MSI. See cleanup-uninstall.ps1 for the
+          full script. This runs synchronously so uninstall does not finish until
+          cleanup has completed. -->
     <CustomAction Id="CleanupAppData"
                   Directory="INSTALLFOLDER"
                   ExeCommand="powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;[INSTALLFOLDER]cleanup-uninstall.ps1&quot;"
                   Impersonate="yes"
-                  Return="asyncNoWait" />
+             Return="check" />
 
     <InstallExecuteSequence>
       <Custom Action="LaunchApp" After="InstallFinalize" Condition="NOT REMOVE" />

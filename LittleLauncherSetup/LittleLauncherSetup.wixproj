@@ -11,4 +11,8 @@
   <PropertyGroup>
     <DefineConstants>BuildOutputPath=$(BuildOutputPath);ProductVersion=$(Version).0</DefineConstants>
   </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="WixToolset.Util.wixext" Version="5.0.2" />
+  </ItemGroup>
 </Project>
