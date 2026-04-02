@@ -170,6 +170,28 @@ $msixArch = if ($Platform -eq "ARM64") { "arm64" } else { "x64" }
 $manifestContent = (Get-Content $manifestSrc -Raw)
 $manifestContent = $manifestContent -replace 'ARCH_PLACEHOLDER', $msixArch
 $manifestContent = $manifestContent -replace 'VERSION_PLACEHOLDER', $msixVersion
+
+# For local (non-Store) builds, replace the Store publisher with the dev cert subject
+# so signtool can sign the package. The Store re-signs with its own cert during ingestion.
+if (-not $NoSign -and [string]::IsNullOrEmpty($TrustedPfxPath)) {
+    $devCert = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2($pfxFile, "LittleLauncher")
+    $devPublisher = $devCert.Subject
+    Write-Host "  Stamping Publisher=$devPublisher (dev cert)"
+    # Read the current Identity Publisher from the manifest so we know what to replace
+    if ($manifestContent -match '<Identity[^>]+Publisher="([^"]+)"') {
+        $storePublisher = $Matches[1]
+        $manifestContent = $manifestContent.Replace("Publisher=`"$storePublisher`"", "Publisher=`"$devPublisher`"")
+    }
+} elseif (-not $NoSign -and -not [string]::IsNullOrEmpty($TrustedPfxPath)) {
+    $trustedCert = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2($TrustedPfxPath, $TrustedPfxPassword)
+    $trustedPublisher = $trustedCert.Subject
+    Write-Host "  Stamping Publisher=$trustedPublisher (trusted cert)"
+    if ($manifestContent -match '<Identity[^>]+Publisher="([^"]+)"') {
+        $storePublisher = $Matches[1]
+        $manifestContent = $manifestContent.Replace("Publisher=`"$storePublisher`"", "Publisher=`"$trustedPublisher`"")
+    }
+}
+
 Set-Content -Path (Join-Path $layoutDir "AppxManifest.xml") -Value $manifestContent -NoNewline
 
 # Copy image assets

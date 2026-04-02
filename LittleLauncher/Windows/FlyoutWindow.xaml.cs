@@ -211,6 +211,11 @@ public partial class FlyoutWindow : Window
         return AppWindow.GetFromWindowId(wndId);
     }
 
+    /// <summary>
+    /// Sets AUMID and relaunch properties (icon, command, display name) on the
+    /// flyout HWND. Called every time the flyout is shown so the taskbar picks up
+    /// icon or name changes without requiring unpin+repin.
+    /// </summary>
     // ── Content ─────────────────────────────────────────────────────
 
     private static int ComputeItemsHash(Launcher launcher)

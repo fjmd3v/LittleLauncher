@@ -10,5 +10,6 @@
     <ApplicationIcon>..\LittleLauncher\Resources\LittleLauncher.ico</ApplicationIcon>
     <PublishAot>true</PublishAot>
     <InvariantGlobalization>true</InvariantGlobalization>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
 </Project>

@@ -26,6 +26,7 @@ Little Launcher uses a flat upright rocket as its identity icon. The **app ident
 - **`Resources/LittleLauncher.ico`** — Multi-resolution Blue rocket (16–256px). Embedded into the exe at build time. This is the fallback icon for all surfaces. Generated from `Resources/AppIcons/Blue.png`.
 - **`Resources/AppIcons/*.png`** — Preset icon PNGs (Blue, Green, Teal, Red, Orange, Purple). Flat upright rockets stretched 20% horizontally for a wider profile. Copied to output at build time. Loaded at runtime by `ResolveBaseIconBitmap()`.
 - **`<AppDataDir>/app-icon-{launcherId}.ico`** — Per-launcher runtime icon. Written by `SaveResolvedIconToAppData(Launcher)`. The first launcher's icon is also copied to `app-icon.ico` by this method.
+- **`<AppDataDir>/app-icon-{launcherId}-pin{tick}.ico`** — Timestamped copy created at pin time. Used by the companion exe for both `LoadImage` (WM_SETICON) and `RelaunchIconResource`. Windows caches icon bitmaps per file path, so each pin gets a unique filename. `CleanUpStaleIconFiles()` keeps only the most recent per launcher.
 - **`<AppDataDir>/app-icon.ico`** — Canonical icon for shortcuts (always mirrors first launcher's icon). Used by `.lnk` shortcuts and the Settings window.
 - **`<AppDataDir>/settings-icon.ico`** — Runtime-generated icon: the current app icon composited with a gear glyph overlay (dark circle + white gear in bottom-right corner). Written by `SaveSettingsIconToAppData()`. Used by the Settings window.
 - **`<AppDataDir>/LittleLauncherFlyout.exe`** — Copy of the companion exe deployed by `EnsureFlyoutShortcut()` for all build types. Pinning uses this copy.
@@ -67,10 +68,12 @@ All icon surfaces derive from a single source of truth: `ResolveBaseIconBitmap(L
 1. User changes `TrayIconMode` in LaunchersPage → `Launcher.PropertyChanged` fires
 2. `CreateTrayIconForLauncher` subscription → `MainWindow.UpdateTrayIcon(Launcher)`
 3. `UpdateTrayIcon(Launcher)` calls `ResolveTrayIcon(Launcher)` → `ResolveBaseIconBitmap(Launcher)` → `BitmapToIcon()` → updates that launcher's native tray icon
-4. `UpdateTrayIcon(Launcher)` calls `UpdateShortcutIcons()` → `SaveResolvedIconToAppData(Launcher)` → writes `app-icon-{id}.ico` (and `app-icon.ico` for first launcher)
-5. `UpdateTrayIcon(Launcher)` calls `SaveSettingsIconToAppData()` → first launcher's bitmap + gear overlay → `BitmapToIcon()` → writes `settings-icon.ico`
-6. `UpdateShortcutIcons()` updates pinned taskbar `.lnk` files that target `LittleLauncherFlyout.exe`
+4. `UpdateTrayIcon(Launcher)` calls `SaveResolvedIconToAppData(Launcher)` → writes `app-icon-{id}.ico` (and `app-icon.ico` for first launcher)
+5. `UpdateTrayIcon(Launcher)` calls `CleanUpStaleIconFiles()` → removes old versioned/pin icon copies
+6. `UpdateTrayIcon(Launcher)` calls `SaveSettingsIconToAppData()` → first launcher's bitmap + gear overlay → `BitmapToIcon()` → writes `settings-icon.ico`
 7. `SettingsWindow.RefreshIcon()` reloads `settings-icon.ico` into titlebar, taskbar, and overlay
+
+**Pinned taskbar icons are NOT updated at runtime.** Windows 11's taskbar caches the icon bitmap per AUMID at pin time and does not re-read it. Changing a launcher's icon requires unpinning and re-pinning. The Launcher Settings dialog shows a note about this near the "Pin to Taskbar" button.
 
 ### Key rendering methods
 
@@ -82,10 +85,15 @@ All icon surfaces derive from a single source of truth: `ResolveBaseIconBitmap(L
 | `CollectLaunchableItems()` | Collects first N launchable items from a launcher, flattening groups, skipping headings/column breaks |
 | `RoundedRectPath()` | Creates a `GraphicsPath` for a rounded rectangle (used by composite background) |
 | `TrimAndResizeTo256()` | Trims transparent padding, centers on 256×256 canvas (called for presets + custom images) |
-| `BitmapToIcon()` | Converts a bitmap to multi-resolution ICO (16–256px) |
+| `BitmapToIcoBytes(Bitmap)` | Converts bitmap to raw multi-resolution ICO byte array (16–256px). Bypasses `System.Drawing.Icon.Save()` which loses multi-resolution data on .NET |
+| `BitmapToIcon(Bitmap)` | Calls `BitmapToIcoBytes()` then wraps in `System.Drawing.Icon` |
 | `ResolveTrayIcon(Launcher)` | `ResolveBaseIconBitmap(Launcher)` → `BitmapToIcon()` |
-| `SaveResolvedIconToAppData(Launcher)` | `ResolveBaseIconBitmap(Launcher)` → `BitmapToIcon()` → write `app-icon-{id}.ico`; copies to `app-icon.ico` for first launcher |
+| `SaveResolvedIconToAppData(Launcher)` | `ResolveBaseIconBitmap(Launcher)` → `BitmapToIcoBytes()` → write `app-icon-{id}.ico`; copies to `app-icon.ico` for first launcher |
 | `SaveSettingsIconToAppData()` | First launcher's `ResolveBaseIconBitmap()` → gear overlay → `BitmapToIcon()` → write file |
+| `RefreshLauncherIcon(Launcher)` | Batch-friendly: updates tray HICON + writes .ico to disk only (no settings save, no cleanup, no settings window refresh) |
+| `UpdateTrayIcon(Launcher)` | Single-launcher convenience: calls `RefreshLauncherIcon` + `SaveSettingsIconToAppData` + `CleanUpStaleIconFiles` + `SettingsWindow.RefreshIcon()` |
+| `EnsureLauncherIconSaved(Launcher)` | Static. Ensures `app-icon-{id}.ico` exists; called by pin flow before creating timestamped copy |
+| `MigrateStaleIconPaths()` | Clears dead `IconPath`/`CustomTrayIconPath` at startup (handles MSIX→WiX path migration) |
 
 ## Settings Window Icon Strategy
 
@@ -101,13 +109,37 @@ windows in the same process as the exe's embedded icon. The workaround uses thre
 
 ## Pinned Taskbar Icon Strategy
 
-The companion exe is deployed to `<AppDataDir>` by `EnsureFlyoutShortcut()` for **all build types** (WiX, MSIX, unpackaged). This gives it a consistent, non-packaged location so the shell treats the `.lnk` like a normal shortcut:
+The companion exe is deployed to `<AppDataDir>` by `EnsureFlyoutShortcut()` for **all build types** (WiX, MSIX, unpackaged). This gives it a consistent, non-packaged location so the shell treats it like a normal app:
 
 1. **`EnsureFlyoutShortcut()`** copies `LittleLauncherFlyout.exe` from the app directory to `<AppDataDir>`.
 2. Writes a `main-exe-path.txt` breadcrumb so the companion exe can launch the main app if it's not running.
-3. `IconLocation` on the `.lnk` controls the pinned taskbar icon.
-4. `UpdateShortcutIcons()` re-stamps the `.lnk`'s `IconLocation` with the current `app-icon.ico` when the user changes their icon preference.
-5. The companion exe loads `app-icon.ico` from `AppContext.BaseDirectory` (its own directory, which is the same `<AppDataDir>`).
+3. The companion exe loads `app-icon-{launcherId}.ico` from `AppContext.BaseDirectory` (same `<AppDataDir>`).
+
+### Pin identity (all builds)
+
+Pin identity comes **solely from relaunch properties** set on the companion exe's MessageBox HWND via a CBT hook:
+- `PKEY_AppUserModel_ID` = `LittleLauncher.Launcher.{guid}.{TickCount64}` — unique per pin attempt to bust Windows' per-AUMID icon cache
+- `PKEY_AppUserModel_RelaunchCommand` = the companion exe path + `--launcher {guid}`
+- `PKEY_AppUserModel_RelaunchIconResource` = timestamped `app-icon-{id}-pin{tick}.ico` path (same path as `LoadImage` uses)
+- `PKEY_AppUserModel_RelaunchDisplayNameResource` = `"Little Launcher - {name}"`
+- CBT hook also calls `SetWindowTextW()` to set the MessageBox title (taskbar reads this for the button tooltip)
+
+The pin flow (in `LaunchersPage.PinToTaskbar_Click`):
+1. `EnsureLauncherIconSaved(launcher)` — ensures `app-icon-{id}.ico` exists
+2. Creates a timestamped copy `app-icon-{id}-pin{tick}.ico`
+3. Minimizes the Settings window (prevents focus stealing that dismisses taskbar context menu)
+4. Launches companion exe with `--pin --launcher {guid} --name "{name}" --icon "{pinnedPath}"`
+5. Restores Settings window + `SetForegroundWindow` after companion exe exits
+
+Both `LoadImage` (WM_SETICON on the MessageBox HWND) and `RelaunchIconResource` use the **same timestamped path**. Windows caches icon bitmaps per file path in its icon cache DB, so reusing a stable path across pin attempts would serve stale cached bitmaps.
+
+`CleanUpStaleIconFiles()` keeps the **most recent** `-pin*.ico` per launcher and deletes older ones. This ensures the pinned shortcut's `RelaunchIconResource` still points to a valid file after app restart.
+
+> **WARNING:** Windows 11's taskbar caches the pin icon bitmap per AUMID at pin time. Changing the icon on disk does NOT update the pinned icon. The only way to update is to unpin and re-pin. The stamped AUMID ensures each re-pin sees a fresh identity.
+
+**Per-launcher Start Menu shortcuts are NOT created.** Previous versions used AUMID-stamped `.lnk` files in the Start Menu as the primary pin identity source. This was removed because combining shortcuts with relaunch properties caused Windows to see two identity sources and create duplicate "(2)" pins. `CleanUpStaleFlyoutShortcuts()` removes any leftover per-launcher shortcuts from previous versions on startup.
+
+> **WARNING:** Windows caches pin display names per AUMID in CloudStore. Changing the display name format requires changing the AUMID format to bust the cache. See `ARCHITECTURE.md` and repo memory `msix-taskbar-pinning.md`.
 
 ## Adding a New Preset Icon
 
@@ -148,8 +180,9 @@ After any bulk icon change, call `FlyoutWindow.InvalidateItems()` so the flyout 
 - The bundled `.ico` is the Blue rocket only — it's the exe identity icon and fallback.
 - `SaveResolvedIconToAppData()` always writes an `.ico` for all modes (including mode 0). There is no "delete and fall back to exe icon" path.
 - The companion exe (`LauncherShortcut/Program.cs`) loads `app-icon.ico` from `AppContext.BaseDirectory` for the pin dialog via `LoadImage` + `WM_SETICON`.
-- `BitmapToIcon()` produces multi-resolution ICO (16, 24, 32, 48, 64, 256) so tray icons render correctly at all DPI scales.
-- `MainWindow` listens for `UISettings.ColorValuesChanged` and refreshes the tray icon, `app-icon.ico`, and SettingsWindow icon when the OS theme changes.
+- `BitmapToIcoBytes()` / `BitmapToIcon()` produce multi-resolution ICO (16, 24, 32, 48, 64, 256) so tray icons render correctly at all DPI scales. `BitmapToIcoBytes()` writes raw ICO bytes directly — do NOT use `System.Drawing.Icon.Save()` which loses multi-resolution data on .NET.
+- `MainWindow` listens for `UISettings.ColorValuesChanged` and refreshes the tray icon, `app-icon.ico`, and SettingsWindow icon when the OS theme changes. Uses `RefreshLauncherIcon()` (batch-friendly) for all launchers, then does a single `SaveSettingsIconToAppData` + `CleanUpStaleIconFiles` + `RefreshIcon` pass.
+- `MigrateStaleIconPaths()` runs at startup before `SetupTrayIcons()` to clear dead `IconPath`/`CustomTrayIconPath` values (e.g. from MSIX→WiX path changes).
 - When the user changes `TrayIconMode`, `UpdateTrayIcon()` also calls `SettingsWindow.RefreshIcon()` to update the settings window titlebar immediately.
 
 ## MSIX VFS Redirection

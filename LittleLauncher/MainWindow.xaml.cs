@@ -54,6 +54,19 @@ public sealed partial class MainWindow : Window
     }
 
     /// <summary>
+    /// Returns the Start Menu Programs folder path.
+    /// In MSIX this is VFS-redirected, but the companion exe's relaunch
+    /// properties handle taskbar pinning identity — the shortcuts here are
+    /// just for the shell's AUMID index (best-effort).
+    /// </summary>
+    internal static string GetStartMenuProgramsDir()
+    {
+        return Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.StartMenu),
+            "Programs");
+    }
+
+    /// <summary>
     /// Returns the physical (non-VFS) path for the app's data directory.
     /// In MSIX, writes to %AppData%\LittleLauncher are VFS-redirected to a
     /// package-specific folder that external processes (shell, companion exe)
@@ -72,6 +85,8 @@ public sealed partial class MainWindow : Window
             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
             "LittleLauncher");
     }
+
+
 
     /// <summary>Holds the Win32 HICON state for one launcher's tray icon.</summary>
     private sealed class TrayIconEntry
@@ -160,7 +175,7 @@ public sealed partial class MainWindow : Window
         ApplyDeferredInit();
         EnsureStartMenuShortcuts();
         EnsureFlyoutShortcut();
-        UpdateShortcutIcons();
+        CleanUpStaleIconFiles();
         FlyoutWindow.WarmUp(this, SettingsManager.Current.Launchers);
         _ = StartAutoSyncAsync();
         _ = FetchMissingIconsOnStartupAsync();
@@ -202,6 +217,11 @@ public sealed partial class MainWindow : Window
     {
         // Apply theme
         ThemeManager.ApplySavedTheme(this);
+
+        // Clear stale paths left by a different install type (e.g. MSIX → WiX).
+        // MSIX VFS-redirects %AppData% into the package's RoamingState folder;
+        // those paths become dead after uninstalling the MSIX and switching to WiX.
+        MigrateStaleIconPaths();
 
         // ── Tray icons (one per launcher) ──────────────────────────
         SetupTrayIcons();
@@ -250,11 +270,7 @@ public sealed partial class MainWindow : Window
                     DispatcherQueue.TryEnqueue(() => UpdateTrayIconVisibility(launcher));
                     break;
                 case nameof(Launcher.Name):
-                    DispatcherQueue.TryEnqueue(() =>
-                    {
-                        UpdateTrayIconTooltip(launcher);
-                        EnsureFlyoutStartMenuShortcuts();
-                    });
+                    DispatcherQueue.TryEnqueue(() => UpdateTrayIconTooltip(launcher));
                     break;
             }
         };
@@ -369,14 +385,19 @@ public sealed partial class MainWindow : Window
             }
         }
 
-        // Create icons for new launchers
+        // Create icons for new launchers, update existing ones.
+        // Use RefreshLauncherIcon (not UpdateTrayIcon) to avoid per-launcher
+        // SaveSettingsIconToAppData/CleanUpStaleIconFiles — we do those once below.
         foreach (var launcher in SettingsManager.Current.Launchers)
         {
             if (!_trayIcons.ContainsKey(launcher.Id))
                 CreateTrayIconForLauncher(launcher);
+            else
+                RefreshLauncherIcon(launcher);
         }
 
         SaveSettingsIconToAppData();
+        SettingsWindow.GetCurrent()?.RefreshIcon();
         FlyoutWindow.WarmUp(this, SettingsManager.Current.Launchers);
     }
 
@@ -727,6 +748,19 @@ public sealed partial class MainWindow : Window
     /// </summary>
     private static System.Drawing.Icon BitmapToIcon(System.Drawing.Bitmap bitmap)
     {
+        var icoBytes = BitmapToIcoBytes(bitmap);
+        using var ms = new MemoryStream(icoBytes);
+        return new System.Drawing.Icon(ms);
+    }
+
+    /// <summary>
+    /// Renders a Bitmap as a multi-resolution ICO byte array (16–256 px, PNG-compressed).
+    /// Used for both in-memory Icon creation and direct file writes.
+    /// Writing these bytes directly to disk avoids System.Drawing.Icon.Save() which
+    /// is known to lose multi-resolution data on .NET.
+    /// </summary>
+    private static byte[] BitmapToIcoBytes(System.Drawing.Bitmap bitmap)
+    {
         int[] sizes = [16, 24, 32, 48, 64, 256];
         byte[][] pngEntries = new byte[sizes.Length][];
 
@@ -775,8 +809,7 @@ public sealed partial class MainWindow : Window
                 bw.Write(pngEntries[i]);
         }
 
-        ms.Position = 0;
-        return new System.Drawing.Icon(ms);
+        return ms.ToArray();
     }
 
     /// <summary>
@@ -806,9 +839,9 @@ public sealed partial class MainWindow : Window
             using var bitmap = ResolveBaseIconBitmap(launcher);
             if (bitmap == null) return null;
 
-            using var icon = BitmapToIcon(bitmap);
-            using (var stream = new FileStream(launcherIcoPath, FileMode.Create, FileAccess.Write))
-                icon.Save(stream);
+            var icoBytes = BitmapToIcoBytes(bitmap);
+
+            File.WriteAllBytes(launcherIcoPath, icoBytes);
 
             // Also update the canonical app-icon.ico if this is the first (or only) launcher
             var firstLauncher = SettingsManager.Current.Launchers.FirstOrDefault();
@@ -874,9 +907,7 @@ public sealed partial class MainWindow : Window
                 g.DrawString("\uE713", font, brush, rect, fmt);
             }
 
-            using var icon = BitmapToIcon(baseBitmap);
-            using var stream = new FileStream(icoPath, FileMode.Create, FileAccess.Write);
-            icon.Save(stream);
+            File.WriteAllBytes(icoPath, BitmapToIcoBytes(baseBitmap));
             return icoPath;
         }
         catch (Exception ex)
@@ -888,9 +919,24 @@ public sealed partial class MainWindow : Window
 
     /// <summary>
     /// Updates the tray icon for a specific launcher and refreshes associated shortcuts.
-    /// Called from the launcher's PropertyChanged handler.
+    /// Called from the launcher's PropertyChanged handler for single-launcher changes.
+    /// For batch updates (sync, startup), use <see cref="RefreshLauncherIcon"/> and
+    /// call <see cref="SaveSettingsIconToAppData"/> once at the end.
     /// </summary>
     internal void UpdateTrayIcon(Launcher launcher)
+    {
+        RefreshLauncherIcon(launcher);
+        SaveSettingsIconToAppData();
+        CleanUpStaleIconFiles();
+        SettingsWindow.GetCurrent()?.RefreshIcon();
+    }
+
+    /// <summary>
+    /// Refreshes a single launcher's tray icon and persists its .ico to disk.
+    /// Does NOT update settings-icon.ico or clean up stale files — callers
+    /// that process multiple launchers should do that once at the end.
+    /// </summary>
+    private void RefreshLauncherIcon(Launcher launcher)
     {
         if (!_trayIcons.TryGetValue(launcher.Id, out var entry)) return;
         entry.Icon?.Dispose();
@@ -909,9 +955,62 @@ public sealed partial class MainWindow : Window
             Shell_NotifyIcon(NIM_MODIFY, ref data);
         }
         SaveResolvedIconToAppData(launcher);
-        UpdateShortcutIcons();
-        SaveSettingsIconToAppData();
-        SettingsWindow.GetCurrent()?.RefreshIcon();
+    }
+
+    /// <summary>
+    /// Cleans up stale versioned icon files from AppData.
+    /// Windows 11's taskbar does not re-read pinned icon bitmaps at runtime,
+    /// so we no longer attempt to update pinned .lnk icons or restart Explorer.
+    /// To change a pinned icon, users must unpin and re-pin the launcher.
+    /// </summary>
+    private static void CleanUpStaleIconFiles()
+    {
+        try
+        {
+            string appDataDir = GetPhysicalAppDataDir();
+            // Remove versioned icon copies (app-icon-{id}-v*.ico)
+            foreach (string f in Directory.GetFiles(appDataDir, "app-icon-*-v*.ico"))
+                try { File.Delete(f); } catch { }
+
+            // For pin copies (app-icon-{id}-pin*.ico), keep the most recent per launcher.
+            // RelaunchIconResource points to the timestamped pin copy, so deleting ALL
+            // of them would make existing pinned icons go blank. Windows also caches
+            // icon bitmaps per file path, so we need unique filenames per pin attempt.
+            var pinFiles = Directory.GetFiles(appDataDir, "app-icon-*-pin*.ico");
+            var pinGroups = new Dictionary<string, List<string>>();
+            foreach (string f in pinFiles)
+            {
+                // Extract launcher ID: "app-icon-{id}-pin{tick}.ico"
+                string name = Path.GetFileNameWithoutExtension(f);
+                int pinIdx = name.LastIndexOf("-pin", StringComparison.Ordinal);
+                if (pinIdx > 0)
+                {
+                    string prefix = name[..pinIdx]; // "app-icon-{id}"
+                    if (!pinGroups.TryGetValue(prefix, out var list))
+                        pinGroups[prefix] = list = [];
+                    list.Add(f);
+                }
+            }
+            foreach (var group in pinGroups.Values)
+            {
+                if (group.Count <= 1) continue;
+                // Keep the newest (highest LastWriteTime), delete the rest
+                group.Sort((a, b) => File.GetLastWriteTimeUtc(b).CompareTo(File.GetLastWriteTimeUtc(a)));
+                for (int i = 1; i < group.Count; i++)
+                    try { File.Delete(group[i]); } catch { }
+            }
+
+            // Legacy single-icon versioned files
+            foreach (string f in Directory.GetFiles(appDataDir, "app-icon-v*.ico"))
+                try { File.Delete(f); } catch { }
+            string altPath = Path.Combine(appDataDir, "app-icon-alt.ico");
+            if (File.Exists(altPath))
+                try { File.Delete(altPath); } catch { }
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn(ex, "Failed to clean up stale icon files");
+        }
     }
 
     internal void UpdateTrayIconVisibility(Launcher launcher)
@@ -948,7 +1047,9 @@ public sealed partial class MainWindow : Window
         DispatcherQueue.TryEnqueue(() =>
         {
             foreach (var launcher in SettingsManager.Current.Launchers)
-                UpdateTrayIcon(launcher);
+                RefreshLauncherIcon(launcher);
+            SaveSettingsIconToAppData();
+            SettingsWindow.GetCurrent()?.RefreshIcon();
         });
     }
 
@@ -962,7 +1063,7 @@ public sealed partial class MainWindow : Window
     /// Scans launcher items on startup and fetches any missing icons.
     /// Covers settings-import-then-restart and machine-migration scenarios.
     /// </summary>
-    private static async Task FetchMissingIconsOnStartupAsync()
+    private async Task FetchMissingIconsOnStartupAsync()
     {
         try
         {
@@ -988,6 +1089,15 @@ public sealed partial class MainWindow : Window
 
             SettingsManager.SaveSettings();
             FlyoutWindow.InvalidateAllItems();
+
+            // Re-save tray icons now that item icons have been re-fetched.
+            // This matters for Composite mode when switching install types
+            // (e.g. MSIX → WiX) where IconPath values pointed to dead VFS paths.
+            // Use RefreshLauncherIcon (batch-friendly) and SaveSettingsIconToAppData once.
+            foreach (var launcher in SettingsManager.Current.Launchers)
+                RefreshLauncherIcon(launcher);
+            SaveSettingsIconToAppData();
+            SettingsWindow.GetCurrent()?.RefreshIcon();
         }
         catch (Exception ex)
         {
@@ -1054,7 +1164,57 @@ public sealed partial class MainWindow : Window
     /// Ensures the Windows startup registry entry includes --silent so the app
     /// starts silently on login. Migrates existing entries that lack the flag.
     /// Runs unconditionally so entries created by old versions (before --silent
-    /// was added) are fixed regardless of the in-app Startup setting.
+    /// <summary>
+    /// Clears icon paths that point to non-existent files, typically caused by
+    /// switching install types (MSIX → WiX or vice versa). MSIX VFS-redirects
+    /// %AppData% into the package's RoamingState folder; those paths become dead
+    /// after uninstalling the MSIX. Clearing them lets FetchMissingIconsOnStartupAsync
+    /// re-fetch into the current cache directory, and lets ResolveBaseIconBitmap
+    /// fall back to color presets instead of returning null.
+    /// </summary>
+    private static void MigrateStaleIconPaths()
+    {
+        bool changed = false;
+        foreach (var launcher in SettingsManager.Current.Launchers)
+        {
+            // Custom tray icon path
+            if (!string.IsNullOrEmpty(launcher.CustomTrayIconPath) && !File.Exists(launcher.CustomTrayIconPath))
+            {
+                launcher.CustomTrayIconPath = "";
+                changed = true;
+            }
+
+            // Item icon paths (recursive into groups)
+            changed |= ClearStaleItemIconPaths(launcher.Items);
+        }
+        if (changed)
+            SettingsManager.SaveSettings();
+    }
+
+    private static bool ClearStaleItemIconPaths(IEnumerable<LauncherItem> items)
+    {
+        bool changed = false;
+        foreach (var item in items)
+        {
+            if (item.IsGroup)
+            {
+                changed |= ClearStaleItemIconPaths(item.Children);
+                continue;
+            }
+            if (!string.IsNullOrEmpty(item.IconPath) && !File.Exists(item.IconPath))
+            {
+                item.IconPath = "";
+                changed = true;
+            }
+        }
+        return changed;
+    }
+
+    /// <summary>
+    /// Ensures existing Windows startup registry entry includes --silent.
+    /// Old versions registered LittleLauncher.exe without the flag, which caused
+    /// the Settings window to appear on login. This ensures entries from before v1.7
+    /// (when --silent was added) are fixed regardless of the in-app Startup setting.
     /// </summary>
     private static void MigrateStartupRegistryEntry()
     {
@@ -1144,22 +1304,42 @@ public sealed partial class MainWindow : Window
         return File.Exists(appDataIcon) ? $"{appDataIcon},0" : fallback;
     }
 
+    /// <summary>
+    /// Removes stale per-launcher flyout shortcuts from the Start Menu.
+    /// Previous versions created these for taskbar pin identity; pinning is
+    /// now handled entirely by the companion exe's relaunch properties.
+    /// </summary>
+    private static void CleanUpStaleFlyoutShortcuts()
+    {
+        try
+        {
+            string startMenuDir = GetStartMenuProgramsDir();
+            if (!Directory.Exists(startMenuDir)) return;
+            foreach (var pattern in new[] { "Little Launcher - *.lnk", "Little Launcher Flyout - *.lnk", "Little Launcher Flyout.lnk" })
+            {
+                foreach (var lnk in Directory.GetFiles(startMenuDir, pattern))
+                {
+                    try { File.Delete(lnk); } catch { }
+                }
+            }
+        }
+        catch { /* best-effort */ }
+    }
+
     private static void EnsureStartMenuShortcuts()
     {
+        // Clean up per-launcher flyout shortcuts from previous versions.
+        // Pinning is now handled entirely by the companion exe's relaunch
+        // properties — no Start Menu flyout shortcuts needed.
+        CleanUpStaleFlyoutShortcuts();
+
         // MSIX packages register their own Start Menu entry via the manifest.
-        // Creating a .lnk would duplicate it. But per-launcher flyout shortcuts
-        // are still needed for pin-to-taskbar even in MSIX.
-        if (IsPackaged)
-        {
-            EnsureFlyoutStartMenuShortcuts();
-            return;
-        }
+        // Creating a .lnk would duplicate it.
+        if (IsPackaged) return;
 
         try
         {
-            string startMenuDir = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.StartMenu),
-                "Programs");
+            string startMenuDir = GetStartMenuProgramsDir();
 
             string exePath = Environment.ProcessPath ?? "";
             if (string.IsNullOrEmpty(exePath) || !File.Exists(exePath))
@@ -1196,135 +1376,13 @@ public sealed partial class MainWindow : Window
         {
             Logger.Warn(ex, "Failed to create Start Menu shortcuts");
         }
-
-        EnsureFlyoutStartMenuShortcuts();
     }
 
     /// <summary>
-    /// Creates (or updates) a Start Menu shortcut per launcher, targeting the
-    /// companion flyout exe with --launcher {guid}.  Each shortcut carries a
-    /// PKEY_AppUserModel_ID that matches the AUMID the companion exe sets on
-    /// itself via SetCurrentProcessExplicitAppUserModelID.  When the user pins
-    /// the companion's taskbar button, Windows finds this matching shortcut and
-    /// uses its target/args/icon for the persistent pin.
-    /// </summary>
-    internal static void EnsureFlyoutStartMenuShortcuts()
-    {
-        try
-        {
-            string startMenuDir = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.StartMenu),
-                "Programs");
-            Directory.CreateDirectory(startMenuDir);
-
-            string flyoutExe = Path.Combine(GetPhysicalAppDataDir(), "LittleLauncherFlyout.exe");
-            if (!File.Exists(flyoutExe)) return;
-
-            // Build a set of expected shortcut filenames so we can detect
-            // renamed launchers and remove their old shortcuts.
-            var expectedNames = new HashSet<string>(
-                SettingsManager.Current.Launchers.Select(l =>
-                    $"Little Launcher Flyout - {SanitizeForFileName(l.Name)}.lnk"),
-                StringComparer.OrdinalIgnoreCase);
-
-            var currentIds = new HashSet<string>(
-                SettingsManager.Current.Launchers.Select(l => l.Id),
-                StringComparer.OrdinalIgnoreCase);
-
-            // Create/update one shortcut per launcher FIRST, so the new shortcut
-            // (with the same AUMID) exists before we delete the old one.
-            // This prevents taskbar pins from being dropped during renames.
-            foreach (var launcher in SettingsManager.Current.Launchers)
-            {
-                string iconPath = Path.Combine(GetPhysicalAppDataDir(), $"app-icon-{launcher.Id}.ico");
-                if (!File.Exists(iconPath))
-                    iconPath = Path.Combine(GetPhysicalAppDataDir(), "app-icon.ico");
-
-                // Sanitize launcher name for filesystem use.
-                string safeName = SanitizeForFileName(launcher.Name);
-                string lnkPath = Path.Combine(startMenuDir, $"Little Launcher Flyout - {safeName}.lnk");
-
-                CreateOrUpdateShortcut(
-                    lnkPath,
-                    flyoutExe,
-                    $"--launcher {launcher.Id}",
-                    $"Open {launcher.Name} flyout",
-                    File.Exists(iconPath) ? $"{iconPath},0" : $"{flyoutExe},0");
-
-                // Stamp the AUMID so the shell matches this shortcut to the
-                // running companion exe when the user pins it.
-                SetShortcutAppUserModelId(lnkPath, $"LittleLauncher.Flyout.{launcher.Id}");
-
-                // Notify the shell about this specific shortcut so it re-reads
-                // the AUMID property before the companion exe is launched.
-                NotifyShellItemUpdated(lnkPath);
-            }
-
-            // Now remove stale flyout shortcuts: deleted launchers OR renamed ones.
-            foreach (var lnk in Directory.GetFiles(startMenuDir, "Little Launcher Flyout *.lnk"))
-            {
-                if (IsFlyoutShortcut(lnk))
-                {
-                    string fileName = Path.GetFileName(lnk);
-                    bool isExpected = expectedNames.Contains(fileName);
-                    bool hasValidId = currentIds.Any(id => ShortcutContainsArg(lnk, id));
-                    // Delete if the launcher was removed OR the shortcut name is stale (renamed)
-                    if (!hasValidId || !isExpected)
-                    {
-                        try { File.Delete(lnk); } catch { }
-                    }
-                }
-            }
-
-            // Broadcast a global association change so the shell re-indexes
-            // all shortcut AUMIDs.  Uses SHCNF_FLUSH for synchronous processing
-            // — the call blocks until the shell has handled the notification,
-            // ensuring the companion exe's AUMID will match correctly.
-            SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST | SHCNF_FLUSH, IntPtr.Zero, IntPtr.Zero);
-        }
-        catch (Exception ex)
-        {
-            Logger.Warn(ex, "Failed to create flyout Start Menu shortcuts");
-        }
-    }
-
-    private static bool ShortcutContainsArg(string lnkPath, string arg)
-    {
-        var shellType = Type.GetTypeFromProgID("WScript.Shell");
-        if (shellType == null) return false;
-        dynamic? shell = Activator.CreateInstance(shellType);
-        if (shell == null) return false;
-        try
-        {
-            dynamic shortcut = shell.CreateShortcut(lnkPath);
-            try
-            {
-                string args = shortcut.Arguments ?? "";
-                return args.Contains(arg, StringComparison.OrdinalIgnoreCase);
-            }
-            finally { Marshal.ReleaseComObject(shortcut); }
-        }
-        finally { Marshal.ReleaseComObject(shell); }
-    }
-
-    private static string SanitizeForFileName(string name)
-    {
-        char[] invalid = Path.GetInvalidFileNameChars();
-        var sb = new System.Text.StringBuilder(name.Length);
-        foreach (char c in name)
-            sb.Append(Array.IndexOf(invalid, c) >= 0 ? '_' : c);
-        string result = sb.ToString().Trim();
-        return string.IsNullOrEmpty(result) ? "Untitled" : result;
-    }
-
-    /// <summary>
-    /// Copies the companion flyout exe to %AppData%\LittleLauncher\ and creates
-    /// a .lnk shortcut in Start Menu\Programs pointing to the AppData copy.
-    ///
-    /// This gives the companion exe a consistent, non-packaged location so that
-    /// pinned taskbar icons always come from the .lnk's IconLocation (app-icon.ico)
-    /// and can be updated at runtime. Works identically for WiX, MSIX, and
-    /// unpackaged builds.
+    /// Copies the companion flyout exe to %AppData%\LittleLauncher\ so it has
+    /// a consistent, non-packaged location for all build types (WiX, MSIX,
+    /// unpackaged). Also writes a main-exe-path.txt breadcrumb and cleans up
+    /// legacy Start Menu shortcuts from previous versions.
     /// </summary>
     private static void EnsureFlyoutShortcut()
     {
@@ -1364,8 +1422,8 @@ public sealed partial class MainWindow : Window
             // Remove the old Start Menu shortcut (no longer created — the
             // pin-to-taskbar button in Settings handles pinning directly).
             string oldLnk = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.StartMenu),
-                "Programs", "Little Launcher Flyout.lnk");
+                GetStartMenuProgramsDir(),
+                "Little Launcher Flyout.lnk");
             if (File.Exists(oldLnk))
                 File.Delete(oldLnk);
         }
@@ -1376,224 +1434,7 @@ public sealed partial class MainWindow : Window
     }
 
     /// <summary>
-    /// Updates the icon on all known LittleLauncher shortcuts:
-    /// Start Menu main shortcut, per-launcher Start Menu flyout shortcuts,
-    /// and any pinned taskbar shortcuts.
-    /// Uses uniquely-versioned icon filenames (app-icon-{id}-v{tick}.ico) so
-    /// the shell's icon cache — which is keyed by (path, index) — always sees
-    /// a path it has never cached, guaranteeing a fresh read from disk.
-    /// </summary>
-    internal void UpdateShortcutIcons()
-    {
-        try
-        {
-            string appDataDir = GetPhysicalAppDataDir();
-            long tick = Environment.TickCount64;
-
-            // Build per-launcher versioned icon paths for cache-busting.
-            var launcherVersionedIcons = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-            foreach (var launcher in SettingsManager.Current.Launchers)
-            {
-                string perLauncherIco = Path.Combine(appDataDir, $"app-icon-{launcher.Id}.ico");
-                if (!File.Exists(perLauncherIco)) continue;
-
-                string versionedPath = Path.Combine(appDataDir, $"app-icon-{launcher.Id}-v{tick}.ico");
-                File.Copy(perLauncherIco, versionedPath, overwrite: true);
-                launcherVersionedIcons[launcher.Id] = versionedPath;
-            }
-
-            // Main shortcut uses the first launcher's icon.
-            var firstLauncher = SettingsManager.Current.Launchers.FirstOrDefault();
-            string mainIconLocation = firstLauncher != null &&
-                launcherVersionedIcons.TryGetValue(firstLauncher.Id, out var firstIconPath)
-                ? $"{firstIconPath},0"
-                : $"{Environment.ProcessPath},0";
-
-            string startMenuDir = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.StartMenu),
-                "Programs");
-
-            // Update per-launcher Start Menu flyout shortcuts
-            // (The main app shortcut always uses the embedded exe icon, so skip it.)
-            foreach (string lnk in Directory.GetFiles(startMenuDir, "Little Launcher Flyout *.lnk"))
-            {
-                string? launcherId = GetFlyoutShortcutLauncherId(lnk);
-                if (launcherId == null) continue;
-                string iconLocation = launcherVersionedIcons.TryGetValue(launcherId, out var iconPath)
-                    ? $"{iconPath},0" : mainIconLocation;
-                UpdateShortcutIconLocation(lnk, iconLocation);
-                NotifyShellItemUpdated(lnk);
-            }
-
-            // Pinned taskbar shortcuts — update ones that target the flyout companion exe
-            string taskbarPinDir = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-                "Microsoft", "Internet Explorer", "Quick Launch",
-                "User Pinned", "TaskBar");
-            if (Directory.Exists(taskbarPinDir))
-            {
-                foreach (string lnk in Directory.GetFiles(taskbarPinDir, "*.lnk"))
-                {
-                    string? launcherId = GetFlyoutShortcutLauncherId(lnk);
-                    if (launcherId == null) continue;
-                    string iconLocation = launcherVersionedIcons.TryGetValue(launcherId, out var iconPath)
-                        ? $"{iconPath},0" : mainIconLocation;
-                    UpdateShortcutIconLocation(lnk, iconLocation);
-                    NotifyShellItemUpdated(lnk);
-                }
-            }
-
-            // Clean up old versioned icon files (keep only current tick)
-            try
-            {
-                string tickSuffix = $"-v{tick}.ico";
-                foreach (string f in Directory.GetFiles(appDataDir, "app-icon-*-v*.ico"))
-                {
-                    if (!f.EndsWith(tickSuffix, StringComparison.OrdinalIgnoreCase))
-                        try { File.Delete(f); } catch { }
-                }
-                // Legacy single-icon versioned files
-                foreach (string f in Directory.GetFiles(appDataDir, "app-icon-v*.ico"))
-                {
-                    try { File.Delete(f); } catch { }
-                }
-                string altPath = Path.Combine(appDataDir, "app-icon-alt.ico");
-                if (File.Exists(altPath))
-                    try { File.Delete(altPath); } catch { }
-            }
-            catch { /* best-effort cleanup */ }
-
-            // Broadcast a global association change so that Windows 11's taskbar
-            // re-reads pinned shortcut icons. Because we use uniquely-versioned
-            // icon file paths, the IconCache.db won't have a stale entry for the
-            // new path — the shell must read the fresh icon from disk.
-            SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, IntPtr.Zero, IntPtr.Zero);
-        }
-        catch (Exception ex)
-        {
-            Logger.Warn(ex, "Failed to update shortcut icons");
-        }
-    }
-
-    /// <summary>
-    /// Sends a targeted SHCNE_UPDATEITEM notification for a specific file path so the
-    /// shell invalidates its cached icon for that file. Uses synchronous flush to
-    /// ensure the shell processes the notification before we return.
-    /// </summary>
-    private static void NotifyShellItemUpdated(string path)
-    {
-        IntPtr pathPtr = System.Runtime.InteropServices.Marshal.StringToHGlobalUni(path);
-        try { SHChangeNotify(SHCNE_UPDATEITEM, SHCNF_PATHW | SHCNF_FLUSH, pathPtr, IntPtr.Zero); }
-        finally { System.Runtime.InteropServices.Marshal.FreeHGlobal(pathPtr); }
-    }
-
-    /// <summary>
-    /// Returns the default icon location for the flyout companion exe.
-    /// </summary>
-    private static string GetFlyoutExeIconFallback()
-    {
-        string flyoutExe = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "LittleLauncherFlyout.exe");
-        return File.Exists(flyoutExe) ? $"{flyoutExe},0" : $"{Environment.ProcessPath},0";
-    }
-
-    /// <summary>
-    /// Checks if a .lnk shortcut targets LittleLauncherFlyout.exe (the companion flyout exe).
-    /// </summary>
-    private static bool IsFlyoutShortcut(string lnkPath)
-    {
-        var shellType = Type.GetTypeFromProgID("WScript.Shell");
-        if (shellType == null) return false;
-        dynamic? shell = Activator.CreateInstance(shellType);
-        if (shell == null) return false;
-        try
-        {
-            dynamic shortcut = shell.CreateShortcut(lnkPath);
-            try
-            {
-                string target = shortcut.TargetPath ?? "";
-                string fileName = Path.GetFileName(target);
-                return fileName.Equals("LittleLauncherFlyout.exe", StringComparison.OrdinalIgnoreCase);
-            }
-            finally
-            {
-                System.Runtime.InteropServices.Marshal.ReleaseComObject(shortcut);
-            }
-        }
-        finally
-        {
-            System.Runtime.InteropServices.Marshal.ReleaseComObject(shell);
-        }
-    }
-
-    /// <summary>
-    /// Checks if a shortcut targets LittleLauncherFlyout.exe and returns the launcher ID
-    /// from its <c>--launcher {guid}</c> argument. Returns null if not a flyout shortcut.
-    /// </summary>
-    private static string? GetFlyoutShortcutLauncherId(string lnkPath)
-    {
-        var shellType = Type.GetTypeFromProgID("WScript.Shell");
-        if (shellType == null) return null;
-        dynamic? shell = Activator.CreateInstance(shellType);
-        if (shell == null) return null;
-        try
-        {
-            dynamic shortcut = shell.CreateShortcut(lnkPath);
-            try
-            {
-                string target = shortcut.TargetPath ?? "";
-                string fileName = Path.GetFileName(target);
-                if (!fileName.Equals("LittleLauncherFlyout.exe", StringComparison.OrdinalIgnoreCase))
-                    return null;
-
-                string args = shortcut.Arguments ?? "";
-                const string prefix = "--launcher ";
-                int idx = args.IndexOf(prefix, StringComparison.OrdinalIgnoreCase);
-                if (idx < 0) return null;
-                string rest = args[(idx + prefix.Length)..].Trim();
-                int spaceIdx = rest.IndexOf(' ');
-                return spaceIdx >= 0 ? rest[..spaceIdx] : rest;
-            }
-            finally
-            {
-                System.Runtime.InteropServices.Marshal.ReleaseComObject(shortcut);
-            }
-        }
-        finally
-        {
-            System.Runtime.InteropServices.Marshal.ReleaseComObject(shell);
-        }
-    }
-
-    private static void UpdateShortcutIconLocation(string lnkPath, string iconLocation)
-    {
-        var shellType = Type.GetTypeFromProgID("WScript.Shell");
-        if (shellType == null) return;
-        dynamic? shell = Activator.CreateInstance(shellType);
-        if (shell == null) return;
-        try
-        {
-            dynamic shortcut = shell.CreateShortcut(lnkPath);
-            try
-            {
-                shortcut.IconLocation = iconLocation;
-                shortcut.Save();
-            }
-            finally
-            {
-                System.Runtime.InteropServices.Marshal.ReleaseComObject(shortcut);
-            }
-        }
-        finally
-        {
-            System.Runtime.InteropServices.Marshal.ReleaseComObject(shell);
-        }
-
-        // Touch the file's last-write time so the shell sees it as modified
-        // and re-reads the icon instead of using its cache.
-        try { File.SetLastWriteTimeUtc(lnkPath, DateTime.UtcNow); }
-        catch { /* best-effort */ }
-    }
-
+    /// Updates the icon on the main Start Menu shortcut (non-MSIX only).
     private static void CreateOrUpdateShortcut(
         string shortcutPath, string exePath, string? arguments,
         string description, string iconLocation)

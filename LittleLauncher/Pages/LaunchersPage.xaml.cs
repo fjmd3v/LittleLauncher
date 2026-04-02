@@ -704,6 +704,7 @@ public sealed partial class LaunchersPage : Page
         var taskbarLabel = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
         taskbarLabel.Children.Add(new TextBlock { Text = "Show in Taskbar", FontSize = 14 });
         taskbarLabel.Children.Add(new TextBlock { Text = "Pin a shortcut to the taskbar for quick access", FontSize = 12, Opacity = 0.5 });
+        taskbarLabel.Children.Add(new TextBlock { Text = "Changing the icon requires unpinning and re-pinning", FontSize = 11, Opacity = 0.4, FontStyle = global::Windows.UI.Text.FontStyle.Italic });
         Grid.SetColumn(taskbarLabel, 0);
         Grid.SetColumn(pinBtn, 1);
         taskbarRow.Children.Add(taskbarLabel);
@@ -874,17 +875,21 @@ public sealed partial class LaunchersPage : Page
     {
         if (sender is not FrameworkElement fe || fe.Tag is not Launcher launcher) return;
 
-        // Ensure the per-launcher icon .ico exists so the shortcut and
-        // companion exe can reference it.
+        // Ensure the per-launcher icon .ico exists so the companion exe's
+        // RelaunchIconResource can reference it.
         MainWindow.EnsureLauncherIconSaved(launcher);
 
-        // Ensure the per-launcher Start Menu shortcut exists with the correct
-        // AUMID, target args, and icon.  When the user pins the running
-        // companion exe, Windows matches this shortcut and uses its properties.
-        MainWindow.EnsureFlyoutStartMenuShortcuts();
+        string appDataDir = MainWindow.GetPhysicalAppDataDir();
+        string baseIco = Path.Combine(appDataDir, $"app-icon-{launcher.Id}.ico");
+        string? pinnedIconPath = null;
+        if (File.Exists(baseIco))
+        {
+            pinnedIconPath = Path.Combine(appDataDir, $"app-icon-{launcher.Id}-pin{Environment.TickCount64}.ico");
+            File.Copy(baseIco, pinnedIconPath, overwrite: true);
+        }
 
         // Launch the companion exe in --pin mode with the launcher's ID
-        string flyoutExe = Path.Combine(MainWindow.GetPhysicalAppDataDir(), "LittleLauncherFlyout.exe");
+        string flyoutExe = Path.Combine(appDataDir, "LittleLauncherFlyout.exe");
         if (!File.Exists(flyoutExe))
             flyoutExe = Path.Combine(AppContext.BaseDirectory, "LittleLauncherFlyout.exe");
 
@@ -894,12 +899,42 @@ public sealed partial class LaunchersPage : Page
             return;
         }
 
-        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+        string iconArg = pinnedIconPath != null ? $" --icon \"{pinnedIconPath}\"" : "";
+
+        // Minimize the settings window while the companion exe is running.
+        // WinUI 3's ContentDialog aggressively reclaims focus, which can
+        // dismiss the taskbar right-click context menu the user needs to
+        // select "Pin to taskbar".
+        var settingsWindow = SettingsWindow.GetCurrent();
+        IntPtr settingsHwnd = settingsWindow != null
+            ? WinRT.Interop.WindowNative.GetWindowHandle(settingsWindow)
+            : IntPtr.Zero;
+        if (settingsHwnd != IntPtr.Zero)
+            NativeMethods.ShowWindow(settingsHwnd, 6 /* SW_MINIMIZE */);
+
+        // Capture the dispatcher before leaving the UI thread
+        var dispatcher = DispatcherQueue;
+
+        var proc = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
         {
             FileName = flyoutExe,
-            Arguments = $"--pin --launcher {launcher.Id}",
-            UseShellExecute = true,
+            Arguments = $"--pin --launcher {launcher.Id} --name \"{launcher.Name}\"{iconArg}",
+            UseShellExecute = false,
         });
+
+        // Restore the settings window after the companion exe exits (user clicked OK).
+        if (proc != null && settingsHwnd != IntPtr.Zero)
+        {
+            _ = Task.Run(async () =>
+            {
+                await proc.WaitForExitAsync();
+                dispatcher.TryEnqueue(() =>
+                {
+                    NativeMethods.ShowWindow(settingsHwnd, 9 /* SW_RESTORE */);
+                    NativeMethods.SetForegroundWindow(settingsHwnd);
+                });
+            });
+        }
     }
 
     private async void DeleteLauncher_Click(object sender, RoutedEventArgs e)

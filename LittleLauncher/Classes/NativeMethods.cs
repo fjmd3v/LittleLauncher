@@ -279,16 +279,6 @@ public static class NativeMethods
     [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
     internal static extern bool Shell_NotifyIcon(uint dwMessage, ref NOTIFYICONDATA lpData);
 
-    [DllImport("shell32.dll")]
-    internal static extern void SHChangeNotify(uint wEventId, uint uFlags, IntPtr dwItem1, IntPtr dwItem2);
-
-    internal const uint SHCNE_UPDATEITEM = 0x00002000;
-    internal const uint SHCNE_ASSOCCHANGED = 0x08000000;
-    internal const uint SHCNF_IDLIST = 0x0000;
-    internal const uint SHCNF_PATHW = 0x0005;
-    internal const uint SHCNF_FLUSH = 0x1000;
-    internal const uint SHCNF_FLUSHNOWAIT = 0x3000;
-
     [DllImport("shell32.dll", CharSet = CharSet.Unicode, PreserveSig = true)]
     internal static extern int SHCreateItemFromParsingName(
         string pszPath, IntPtr pbc, ref Guid riid,
@@ -511,27 +501,6 @@ public static class NativeMethods
         {
             PropVariantClear(pv);
             Marshal.FreeCoTaskMem(pv);
-        }
-    }
-
-    /// <summary>
-    /// Sets the AppUserModel.ID property on a .lnk shortcut file so the
-    /// shell can match a running process's AUMID to this shortcut when pinning.
-    /// </summary>
-    internal static void SetShortcutAppUserModelId(string lnkPath, string appId)
-    {
-        var IID_IPropertyStore = new Guid("886D8EEB-8CF2-4446-8D02-CDBA1DBDCF99");
-        int hr = SHGetPropertyStoreFromParsingName(lnkPath, IntPtr.Zero, GPS_READWRITE, ref IID_IPropertyStore, out var store);
-        if (hr != S_OK || store == null) return;
-
-        try
-        {
-            SetPropertyStoreString(store, PKEY_AppUserModel_ID, appId);
-            store.Commit();
-        }
-        finally
-        {
-            Marshal.ReleaseComObject(store);
         }
     }
 

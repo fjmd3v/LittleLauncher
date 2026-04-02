@@ -5,6 +5,8 @@
 
 Remove-Item -Recurse -Force -ErrorAction SilentlyContinue "$env:APPDATA\LittleLauncher"
 Remove-Item -Force -ErrorAction SilentlyContinue "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Little Launcher Flyout.lnk"
+Remove-Item -Force -ErrorAction SilentlyContinue "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Little Launcher Flyout - *.lnk"
+Remove-Item -Force -ErrorAction SilentlyContinue "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Little Launcher - *.lnk"
 Remove-ItemProperty -Path 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run' -Name 'Little Launcher' -ErrorAction SilentlyContinue
 
 $shell = New-Object -ComObject WScript.Shell
