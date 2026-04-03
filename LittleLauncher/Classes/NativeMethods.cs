@@ -262,11 +262,22 @@ public static class NativeMethods
         public IntPtr hIcon;
         [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)]
         public string szTip;
+        public uint dwState;
+        public uint dwStateMask;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 256)]
+        public string szInfo;
+        public uint uVersion;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 64)]
+        public string szInfoTitle;
+        public uint dwInfoFlags;
+        public Guid guidItem;
+        public IntPtr hBalloonIcon;
     }
 
     internal const uint NIF_MESSAGE = 0x00000001;
     internal const uint NIF_ICON    = 0x00000002;
     internal const uint NIF_TIP     = 0x00000004;
+    internal const uint NIF_GUID    = 0x00000020;
     internal const uint NIM_ADD     = 0x00000000;
     internal const uint NIM_MODIFY  = 0x00000001;
     internal const uint NIM_DELETE  = 0x00000002;

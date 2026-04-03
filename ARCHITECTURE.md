@@ -13,6 +13,8 @@ App.xaml  →  MainWindow (invisible, owns tray icon)
                       └── AboutPage
 ```
 
+Each launcher's native tray icon is registered with Shell_NotifyIcon using a stable GUID derived from `Launcher.Id` in addition to the runtime `uID`. This gives Windows a persistent identity for the icon so tray visibility/pin state survives app restarts and Store-driven MSIX updates.
+
 ## LauncherItemsPage multi-column layout and drag-and-drop
 
 The Launcher Items settings page renders items in a multi-column `Grid` (`ColumnsPanel`). The flat `Items` collection is split at `IsColumnBreak` sentinel items into per-column `ObservableCollection<LauncherItem>` lists by `BuildColumnLists()`. Each column gets its own `ListView` (fixed 280px wide), with column headers showing "Column N" and a remove button (except column 1). Users add columns via "Add Column" and remove them via the column header delete button (which merges items into the previous column). Each item/group card has a `...` context menu button (visible on hover via Opacity toggling) with Move up/down, Move to…, Edit, and Remove actions.

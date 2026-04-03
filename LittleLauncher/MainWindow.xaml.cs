@@ -10,6 +10,7 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Windowing;
 using System.Drawing.Imaging;
 using System.IO;
+using System.Security.Cryptography;
 using System.Windows.Automation;
 using WinRT.Interop;
 using static LittleLauncher.Classes.NativeMethods;
@@ -93,6 +94,7 @@ public sealed partial class MainWindow : Window
     private sealed class TrayIconEntry
     {
         public uint Uid;
+        public Guid Guid;
         public System.Drawing.Icon? Icon;
         public bool IsAdded; // false when NIconHide=true (NIM_DELETE called)
     }
@@ -249,10 +251,11 @@ public sealed partial class MainWindow : Window
         _wmShowFlyoutPerLauncher[launcher.Id] = wmFlyout;
 
         uint uid = _nextIconId++;
+        Guid trayGuid = GetTrayIconGuid(launcher.Id);
         var icon = ResolveTrayIcon(launcher);
         SaveResolvedIconToAppData(launcher);
 
-        var entry = new TrayIconEntry { Uid = uid, Icon = icon };
+        var entry = new TrayIconEntry { Uid = uid, Guid = trayGuid, Icon = icon };
         _trayIcons[launcher.Id] = entry;
 
         if (!launcher.NIconHide)
@@ -286,10 +289,13 @@ public sealed partial class MainWindow : Window
             cbSize = (uint)Marshal.SizeOf<NOTIFYICONDATA>(),
             hWnd = _hwnd,
             uID = entry.Uid,
-            uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP,
+            uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP | NIF_GUID,
             uCallbackMessage = (uint)_wmTrayCallback,
             hIcon = entry.Icon?.Handle ?? IntPtr.Zero,
             szTip = tip,
+            szInfo = "",
+            szInfoTitle = "",
+            guidItem = entry.Guid,
         };
         Shell_NotifyIcon(NIM_ADD, ref data);
         entry.IsAdded = true;
@@ -302,7 +308,11 @@ public sealed partial class MainWindow : Window
             cbSize = (uint)Marshal.SizeOf<NOTIFYICONDATA>(),
             hWnd = _hwnd,
             uID = entry.Uid,
+            uFlags = NIF_GUID,
             szTip = "",
+            szInfo = "",
+            szInfoTitle = "",
+            guidItem = entry.Guid,
         };
         Shell_NotifyIcon(NIM_DELETE, ref data);
         entry.IsAdded = false;
@@ -949,9 +959,12 @@ public sealed partial class MainWindow : Window
                 cbSize = (uint)Marshal.SizeOf<NOTIFYICONDATA>(),
                 hWnd = _hwnd,
                 uID = entry.Uid,
-                uFlags = NIF_ICON,
+                uFlags = NIF_ICON | NIF_GUID,
                 hIcon = entry.Icon?.Handle ?? IntPtr.Zero,
                 szTip = "",
+                szInfo = "",
+                szInfoTitle = "",
+                guidItem = entry.Guid,
             };
             Shell_NotifyIcon(NIM_MODIFY, ref data);
         }
@@ -1033,10 +1046,24 @@ public sealed partial class MainWindow : Window
             cbSize = (uint)Marshal.SizeOf<NOTIFYICONDATA>(),
             hWnd = _hwnd,
             uID = entry.Uid,
-            uFlags = NIF_TIP,
+            uFlags = NIF_TIP | NIF_GUID,
             szTip = tip,
+            szInfo = "",
+            szInfoTitle = "",
+            guidItem = entry.Guid,
         };
         Shell_NotifyIcon(NIM_MODIFY, ref data);
+    }
+
+    private static Guid GetTrayIconGuid(string launcherId)
+    {
+        if (Guid.TryParse(launcherId, out var parsedGuid))
+            return parsedGuid;
+
+        byte[] hash = MD5.HashData(System.Text.Encoding.UTF8.GetBytes("LittleLauncher.Tray." + launcherId));
+        hash[6] = (byte)((hash[6] & 0x0F) | 0x30);
+        hash[8] = (byte)((hash[8] & 0x3F) | 0x80);
+        return new Guid(hash);
     }
 
     private void OnSystemThemeChanged(global::Windows.UI.ViewManagement.UISettings sender, object args)
