@@ -91,13 +91,13 @@ Supports both private-key (`PrivateKeyFile`) and password-based authentication.
 
 ## FlyoutWindow
 
-The flyout popup dismisses when focus is lost via the WinUI `Activated` event (`Deactivated` state). It uses `WS_EX_TOOLWINDOW` to stay out of Alt-Tab and `OverlappedPresenter.CreateForContextMenu()` for borderless always-on-top presentation.
+The flyout popup dismisses when focus is lost via the WinUI `Activated` event (`Deactivated` state). It also toggles closed when the user clicks the same tray icon or pinned taskbar shortcut while that launcher's flyout is already open. It uses `WS_EX_TOOLWINDOW` to stay out of Alt-Tab and `OverlappedPresenter.CreateForContextMenu()` for borderless always-on-top presentation. When the `UserSettings.FlyoutAnimationsEnabled` setting is on, the fully rendered flyout window is moved a short distance from its anchored edge with eased `SetWindowPos` steps, so the whole popup slides as one surface instead of revealing its frame and contents in stages.
 
 **Multi-column & multi-view layout**: The flyout renders items into a horizontal `ColumnsPanel` (a `StackPanel`). Each `LauncherItem` with `IsColumnBreak = true` starts a new column. The display mode is controlled by `Launcher.ViewMode`:
-- **List view** (ViewMode = 0, default): Each column is a `ListView` (175 px wide) with icon + text side-by-side, using `ItemTemplateSelector` and `ItemContainerStyleSelector`.
-- **Icon view** (ViewMode = 1): Each column is a dynamically created `ScrollViewer` containing icon tiles in a 3-column wrapping grid (260 px wide), with 32×32 icons and text below.
+- **Icon view** (ViewMode = 0, default): Each column is a dynamically created `ScrollViewer` containing icon tiles in a wrapping grid. `Launcher.IconModeIconsPerRow` controls the maximum icons shown across each icon-mode column (default 3, configurable from 1 to 6), and the flyout shrinks each column to the widest row actually present so sparse layouts do not keep extra horizontal whitespace.
+- **List view** (ViewMode = 1): Each column is a `ListView` (175 px wide) with icon + text side-by-side, using `ItemTemplateSelector` and `ItemContainerStyleSelector`.
 
-`RebuildColumnsPanel()` rebuilds all columns (icon grid or ListView) from scratch whenever items change. Window width scales: 175 px (list) or 260 px (icon) per column.
+`RebuildColumnsPanel()` rebuilds all columns (icon grid or ListView) from scratch whenever items change. Window width scales per column: 175 px for list view, or a dynamic icon-mode width derived from the configured icons-per-row value.
 
 **Right-click context menu**: Right-clicking empty space in the flyout shows a `ContextFlyout` with a "Settings" option that dismisses the flyout and opens `SettingsWindow`.
 

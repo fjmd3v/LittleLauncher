@@ -25,6 +25,10 @@ public partial class UserSettings : ObservableObject
     [ObservableProperty]
     public partial bool Startup { get; set; }
 
+    /// <summary>Animate launcher flyouts when they open and close.</summary>
+    [ObservableProperty]
+    public partial bool FlyoutAnimationsEnabled { get; set; }
+
     // NIconHide, TrayIconMode, CustomTrayIconPath are kept here as legacy XML migration fields only.
     // They are copied into the first Launcher during CompleteInitialization() and then cleared.
     // Per-launcher icon settings now live on each Launcher object in the Launchers collection.
@@ -161,6 +165,7 @@ public partial class UserSettings : ObservableObject
     {
         AppTheme = 0;
         Startup = false;
+        FlyoutAnimationsEnabled = true;
         NIconHide = false;
         TrayIconMode = 0;
         CustomTrayIconPath = "";

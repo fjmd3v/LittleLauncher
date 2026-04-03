@@ -28,11 +28,14 @@ namespace LittleLauncher.Windows;
 public partial class FlyoutWindow : Window
 {
     private const int ColumnWidth = 175;
-    private const int IconColumnWidth = 260;
+    private const int DefaultIconColumnWidth = 260;
     private const int IconCellWidth = 80;
     private const int IconCellHeight = 84;
     private const int IconSize = 32;
-    private const int IconsPerRow = 3;
+    private const int IconColumnChromeWidth = DefaultIconColumnWidth - (IconCellWidth * Launcher.DefaultIconModeIconsPerRow);
+    private const double SlideDistanceDip = 36;
+    private const uint ShowAnimationDurationMs = 200;
+    private const uint HideAnimationDurationMs = 160;
 
     private static readonly NLog.Logger Logger = NLog.LogManager.GetCurrentClassLogger();
     private static readonly object BoundsFileLock = new();
@@ -48,7 +51,26 @@ public partial class FlyoutWindow : Window
     private IntPtr _hwnd;
     private SUBCLASSPROC? _wndProcDelegate;
     private bool _isShowing;
+    private bool _isHiding;
+    private int _animationVersion;
     private readonly Launcher _launcher;  // The launcher this window displays
+    private FlyoutEntranceEdge _lastEntranceEdge = FlyoutEntranceEdge.Bottom;
+
+    private readonly record struct FlyoutPlacement(
+        int Left,
+        int Top,
+        int StartTop,
+        int Width,
+        int Height,
+        FlyoutEntranceEdge Edge);
+
+    private enum FlyoutEntranceEdge
+    {
+        Top,
+        Bottom,
+    }
+
+    private static bool AreAnimationsEnabled => SettingsManager.Current.FlyoutAnimationsEnabled;
 
     private FlyoutWindow(MainWindow owner, Launcher launcher)
     {
@@ -89,10 +111,7 @@ public partial class FlyoutWindow : Window
     {
         if (_isShowing) return;
         if (args.WindowActivationState == WindowActivationState.Deactivated)
-        {
-            ShowWindow(_hwnd, SW_HIDE);
-            _lastDismissed = DateTime.UtcNow;
-        }
+            HideFlyout();
     }
 
     private IntPtr WndProc(IntPtr hwnd, uint msg, IntPtr wParam, IntPtr lParam, nuint uIdSubclass, nuint dwRefData)
@@ -129,12 +148,13 @@ public partial class FlyoutWindow : Window
             if (GetWindowLong(instance._hwnd, GWL_STYLE) != 0 &&
                 (GetWindowLong(instance._hwnd, GWL_STYLE) & WS_VISIBLE) != 0)
             {
-                instance.HideFlyout();
+                if (!instance._isHiding)
+                    instance.HideFlyout();
                 return;
             }
         }
 
-        if ((DateTime.UtcNow - instance._lastDismissed).TotalMilliseconds < 300)
+        if (!instance._isHiding && (DateTime.UtcNow - instance._lastDismissed).TotalMilliseconds < 300)
             return;
 
         instance._owner = owner;
@@ -143,19 +163,12 @@ public partial class FlyoutWindow : Window
         // Calculate DPI-aware dimensions
         double dpiScale = GetDpiForWindow(instance._hwnd) / 96.0;
         if (dpiScale <= 0) dpiScale = 1.0;
-        int columnCount = Math.Max(1, instance.ColumnsPanel.Children.Count);
-        int colWidth = instance._launcher.ViewMode == 1 ? ColumnWidth : IconColumnWidth;
-        int flyoutWidthPx = (int)(colWidth * columnCount * dpiScale);
+        int flyoutWidthPx = (int)Math.Ceiling(instance.GetFlyoutWidth() * dpiScale);
         int flyoutHeightPx = (int)Math.Ceiling(instance.MeasureContentHeight() * dpiScale);
 
-        // Position off-screen first, then show
         instance._isShowing = true;
         var appWindow = instance.GetAppWindow();
         appWindow.Resize(new global::Windows.Graphics.SizeInt32(flyoutWidthPx, flyoutHeightPx));
-        ShowWindow(instance._hwnd, SW_SHOWNOACTIVATE);
-        SetForegroundWindow(instance._hwnd);
-        SetFocus(instance._hwnd);
-
         if (!instance._toolWindowStyleApplied)
         {
             int exStyle = GetWindowLong(instance._hwnd, GWL_EXSTYLE);
@@ -163,8 +176,12 @@ public partial class FlyoutWindow : Window
             instance._toolWindowStyleApplied = true;
         }
 
-        instance.PositionAt(screenX, screenY);
-        instance._isShowing = false;
+        var placement = instance.CalculatePlacement(screenX, screenY);
+        instance._lastEntranceEdge = placement.Edge;
+        if (AreAnimationsEnabled)
+            instance.ShowAnimated(placement);
+        else
+            instance.ShowWithoutAnimation(placement);
     }
 
     public static void DismissIfOpen()
@@ -202,7 +219,151 @@ public partial class FlyoutWindow : Window
 
     private void HideFlyout()
     {
-        ShowWindow(_hwnd, SW_HIDE);
+        if (_hwnd == IntPtr.Zero || !IsWindow(_hwnd))
+            return;
+
+        if ((GetWindowLong(_hwnd, GWL_STYLE) & WS_VISIBLE) == 0)
+            return;
+
+        _lastDismissed = DateTime.UtcNow;
+        _animationVersion++;
+
+        if (!AreAnimationsEnabled)
+        {
+            _isShowing = false;
+            _isHiding = false;
+            ShowWindow(_hwnd, SW_HIDE);
+            return;
+        }
+
+        _isHiding = true;
+        _isShowing = false;
+
+        GetWindowRect(_hwnd, out var rect);
+        int width = rect.Right - rect.Left;
+        int height = rect.Bottom - rect.Top;
+        int exitOffset = GetSlideDistancePx();
+        int endTop = _lastEntranceEdge == FlyoutEntranceEdge.Top ? rect.Top - exitOffset : rect.Top + exitOffset;
+        int animationVersion = ++_animationVersion;
+
+        AnimateWindowPosition(animationVersion, rect.Left, rect.Top, endTop, width, height, HideAnimationDurationMs, hideAtEnd: true);
+    }
+
+    private void ShowWithoutAnimation(FlyoutPlacement placement)
+    {
+        _animationVersion++;
+        _isHiding = false;
+        _isShowing = true;
+
+        SetWindowPos(_hwnd, 0, placement.Left, placement.Top, placement.Width, placement.Height,
+            SWP_NOZORDER | SWP_NOACTIVATE | SWP_SHOWWINDOW);
+        SetForegroundWindow(_hwnd);
+        SetFocus(_hwnd);
+
+        _isShowing = false;
+    }
+
+    private void ShowAnimated(FlyoutPlacement placement)
+    {
+        _isHiding = false;
+        _isShowing = true;
+
+        int startTop = placement.StartTop;
+        if ((GetWindowLong(_hwnd, GWL_STYLE) & WS_VISIBLE) != 0 && GetWindowRect(_hwnd, out var rect))
+            startTop = rect.Top;
+
+        int animationVersion = ++_animationVersion;
+
+        SetWindowPos(_hwnd, 0, placement.Left, startTop, placement.Width, placement.Height,
+            SWP_NOZORDER | SWP_NOACTIVATE | SWP_SHOWWINDOW);
+        SetForegroundWindow(_hwnd);
+        SetFocus(_hwnd);
+
+        if (startTop == placement.Top)
+        {
+            _isShowing = false;
+            return;
+        }
+
+        AnimateWindowPosition(animationVersion, placement.Left, startTop, placement.Top,
+            placement.Width, placement.Height, ShowAnimationDurationMs, hideAtEnd: false);
+    }
+
+    private void AnimateWindowPosition(int animationVersion, int left, int startTop, int endTop, int width, int height, uint durationMs, bool hideAtEnd)
+    {
+        if (startTop == endTop)
+        {
+            CompleteWindowAnimation(animationVersion, left, endTop, width, height, hideAtEnd);
+            return;
+        }
+
+        var stopwatch = Stopwatch.StartNew();
+        EventHandler<object>? handler = null;
+        handler = (_, _) =>
+        {
+            if (animationVersion != _animationVersion || _hwnd == IntPtr.Zero || !IsWindow(_hwnd))
+            {
+                CompositionTarget.Rendering -= handler;
+                return;
+            }
+
+            double progress = Math.Clamp(stopwatch.Elapsed.TotalMilliseconds / durationMs, 0, 1);
+            double eased = hideAtEnd ? EaseInCubic(progress) : EaseOutCubic(progress);
+            int currentTop = (int)Math.Round(Lerp(startTop, endTop, eased));
+
+            SetWindowPos(_hwnd, 0, left, currentTop, width, height,
+                SWP_NOZORDER | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS);
+
+            if (progress >= 1)
+            {
+                CompositionTarget.Rendering -= handler;
+                CompleteWindowAnimation(animationVersion, left, endTop, width, height, hideAtEnd);
+            }
+        };
+
+        CompositionTarget.Rendering += handler;
+    }
+
+    private void CompleteWindowAnimation(int animationVersion, int left, int top, int width, int height, bool hideAtEnd)
+    {
+        if (animationVersion != _animationVersion || _hwnd == IntPtr.Zero || !IsWindow(_hwnd))
+            return;
+
+        SetWindowPos(_hwnd, 0, left, top, width, height,
+            SWP_NOZORDER | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS);
+
+        if (hideAtEnd)
+        {
+            ShowWindow(_hwnd, SW_HIDE);
+            _isHiding = false;
+        }
+        else
+        {
+            _isShowing = false;
+        }
+    }
+
+    private int GetSlideDistancePx()
+    {
+        double scale = GetDpiForWindow(_hwnd) / 96.0;
+        if (scale <= 0) scale = 1.0;
+        return Math.Max(18, (int)Math.Round(SlideDistanceDip * scale));
+    }
+
+    private static double Lerp(int start, int end, double progress)
+    {
+        return start + ((end - start) * progress);
+    }
+
+    private static double EaseOutCubic(double progress)
+    {
+        double inverse = 1 - progress;
+        return 1 - (inverse * inverse * inverse);
+    }
+
+    private static double EaseInCubic(double progress)
+    {
+        return progress * progress * progress;
     }
 
     private AppWindow GetAppWindow()
@@ -224,6 +385,7 @@ public partial class FlyoutWindow : Window
         if (items == null || items.Count == 0) return 0;
         var hash = new HashCode();
         hash.Add(launcher.ViewMode);
+        hash.Add(Launcher.ClampIconModeIconsPerRow(launcher.IconModeIconsPerRow));
         hash.Add(launcher.ShowTitle);
         hash.Add(launcher.Name);
         foreach (var item in items)
@@ -307,9 +469,54 @@ public partial class FlyoutWindow : Window
 
     // ── Icon mode rendering ─────────────────────────────────────────
 
+    private int GetIconModeIconsPerRow() => Launcher.ClampIconModeIconsPerRow(_launcher.IconModeIconsPerRow);
+
+    private int GetIconColumnWidth() => IconColumnChromeWidth + (GetIconModeIconsPerRow() * IconCellWidth);
+
+    private int GetIconColumnWidth(ObservableCollection<LauncherItem> items)
+    {
+        int maxIconsPerRow = GetIconModeIconsPerRow();
+        int widestRow = 0;
+        int currentRow = 0;
+
+        foreach (var item in items)
+        {
+            if (item.IsGroup)
+            {
+                widestRow = Math.Max(widestRow, currentRow);
+                currentRow = 0;
+                continue;
+            }
+
+            currentRow++;
+            if (currentRow >= maxIconsPerRow)
+            {
+                widestRow = Math.Max(widestRow, maxIconsPerRow);
+                currentRow = 0;
+            }
+        }
+
+        widestRow = Math.Max(widestRow, currentRow);
+        widestRow = Math.Max(1, widestRow);
+        return IconColumnChromeWidth + (widestRow * IconCellWidth);
+    }
+
+    private int GetFlyoutWidth()
+    {
+        if (_launcher.ViewMode == 1)
+            return ColumnWidth * Math.Max(1, ColumnsPanel.Children.Count);
+
+        int totalWidth = 0;
+        foreach (var column in BuildColumnLists())
+            totalWidth += GetIconColumnWidth(column);
+
+        return totalWidth;
+    }
+
     private ScrollViewer CreateIconModeColumn(ObservableCollection<LauncherItem> items)
     {
-        var column = new StackPanel { Width = IconColumnWidth, Padding = new Thickness(8, 6, 8, 6) };
+        int iconsPerRow = GetIconModeIconsPerRow();
+        var column = new StackPanel { Width = GetIconColumnWidth(items), Padding = new Thickness(8, 6, 8, 6) };
         var currentRow = new StackPanel { Orientation = Orientation.Horizontal };
         int itemsInRow = 0;
 
@@ -327,7 +534,7 @@ public partial class FlyoutWindow : Window
         {
             currentRow.Children.Add(CreateIconTile(child));
             itemsInRow++;
-            if (itemsInRow >= IconsPerRow)
+            if (itemsInRow >= iconsPerRow)
                 FlushRow();
         }
 
@@ -565,7 +772,7 @@ public partial class FlyoutWindow : Window
 
     // ── Positioning ─────────────────────────────────────────────────
 
-    private void PositionAt(int screenX, int screenY)
+    private FlyoutPlacement CalculatePlacement(int screenX, int screenY)
     {
         var pt = new POINT { X = screenX, Y = screenY };
         IntPtr hMonitor = MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST);
@@ -578,11 +785,10 @@ public partial class FlyoutWindow : Window
         GetMonitorInfo(hMonitor, ref monitorInfo);
         var workArea = monitorInfo.rcWork;
 
-        int columnCount = Math.Max(1, ColumnsPanel.Children.Count);
-        int colWidth = _launcher.ViewMode != 1 ? IconColumnWidth : ColumnWidth;
-        int flyoutWidth = (int)(colWidth * columnCount * scale);
+        int flyoutWidth = (int)Math.Ceiling(GetFlyoutWidth() * scale);
         int flyoutHeight = (int)Math.Ceiling(MeasureContentHeight() * scale);
         int gap = Math.Max(4, (int)Math.Round(8 * scale));
+        int slideDistance = Math.Max(18, (int)Math.Round(SlideDistanceDip * scale));
 
         int left = screenX - flyoutWidth / 2;
         int top;
@@ -616,8 +822,9 @@ public partial class FlyoutWindow : Window
         if (top + flyoutHeight > workArea.Bottom) top = workArea.Bottom - flyoutHeight;
         if (top < workArea.Top) top = workArea.Top;
 
-        SetWindowPos(_hwnd, 0, left, top, flyoutWidth, flyoutHeight,
-            SWP_NOZORDER | SWP_NOACTIVATE | SWP_SHOWWINDOW);
+        var edge = nearTop ? FlyoutEntranceEdge.Top : FlyoutEntranceEdge.Bottom;
+        int startTop = edge == FlyoutEntranceEdge.Top ? top - slideDistance : top + slideDistance;
+        return new FlyoutPlacement(left, top, startTop, flyoutWidth, flyoutHeight, edge);
     }
 
     // ── Event handlers ──────────────────────────────────────────────
@@ -1103,6 +1310,7 @@ public partial class FlyoutWindow : Window
     {
         const double groupHeight = 30; // TextBlock(12) + Margin(8+4) ≈ 28, rounded up
         const double listPadding = 12;
+        int iconsPerRow = GetIconModeIconsPerRow();
 
         var items = _launcher.Items;
         if (items == null) return _lastMeasuredHeight;
@@ -1117,7 +1325,7 @@ public partial class FlyoutWindow : Window
             {
                 if (pendingIcons > 0)
                 {
-                    int rows = (pendingIcons + IconsPerRow - 1) / IconsPerRow;
+                    int rows = (pendingIcons + iconsPerRow - 1) / iconsPerRow;
                     currentColumnHeight += rows * IconCellHeight;
                     pendingIcons = 0;
                 }
@@ -1130,7 +1338,7 @@ public partial class FlyoutWindow : Window
             {
                 if (pendingIcons > 0)
                 {
-                    int rows = (pendingIcons + IconsPerRow - 1) / IconsPerRow;
+                    int rows = (pendingIcons + iconsPerRow - 1) / iconsPerRow;
                     currentColumnHeight += rows * IconCellHeight;
                     pendingIcons = 0;
                 }
@@ -1146,7 +1354,7 @@ public partial class FlyoutWindow : Window
 
         if (pendingIcons > 0)
         {
-            int rows = (pendingIcons + IconsPerRow - 1) / IconsPerRow;
+            int rows = (pendingIcons + iconsPerRow - 1) / iconsPerRow;
             currentColumnHeight += rows * IconCellHeight;
         }
 

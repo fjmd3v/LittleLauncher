@@ -617,12 +617,6 @@ public sealed partial class LaunchersPage : Page
         viewModeCombo.Items.Add("Icons");
         viewModeCombo.Items.Add("List");
         viewModeCombo.SelectedIndex = Math.Clamp(launcher.ViewMode, 0, 1);
-        viewModeCombo.SelectionChanged += (s, e) =>
-        {
-            launcher.ViewMode = viewModeCombo.SelectedIndex;
-            SettingsManager.SaveSettings();
-            FlyoutWindow.InvalidateItems(launcher.Id);
-        };
 
         var viewModeRow = new Grid();
         viewModeRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -635,6 +629,48 @@ public sealed partial class LaunchersPage : Page
         Grid.SetColumn(viewModeCombo, 1);
         viewModeRow.Children.Add(viewModeLabel);
         viewModeRow.Children.Add(viewModeCombo);
+
+        // ── Icon mode density ───────────────────────────────────
+        var iconsPerRowCombo = new ComboBox { MinWidth = 100 };
+        for (int iconsPerRow = Launcher.MinIconModeIconsPerRow; iconsPerRow <= Launcher.MaxIconModeIconsPerRow; iconsPerRow++)
+            iconsPerRowCombo.Items.Add(iconsPerRow.ToString());
+        iconsPerRowCombo.SelectedItem = Launcher.ClampIconModeIconsPerRow(launcher.IconModeIconsPerRow).ToString();
+        iconsPerRowCombo.SelectionChanged += (s, e) =>
+        {
+            if (iconsPerRowCombo.SelectedItem is string selected && int.TryParse(selected, out int iconsPerRow))
+            {
+                launcher.IconModeIconsPerRow = Launcher.ClampIconModeIconsPerRow(iconsPerRow);
+                SettingsManager.SaveSettings();
+                FlyoutWindow.InvalidateItems(launcher.Id);
+            }
+        };
+
+        var iconsPerRowRow = new Grid();
+        iconsPerRowRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        iconsPerRowRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+        var iconsPerRowLabel = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
+        iconsPerRowLabel.Children.Add(new TextBlock { Text = "Icons Per Row", FontSize = 14 });
+        iconsPerRowLabel.Children.Add(new TextBlock { Text = "How many icons fit across each icon-mode column", FontSize = 12, Opacity = 0.5 });
+        Grid.SetColumn(iconsPerRowLabel, 0);
+        Grid.SetColumn(iconsPerRowCombo, 1);
+        iconsPerRowRow.Children.Add(iconsPerRowLabel);
+        iconsPerRowRow.Children.Add(iconsPerRowCombo);
+
+        void UpdateIconModeControls()
+        {
+            iconsPerRowRow.Visibility = viewModeCombo.SelectedIndex == 0 ? Visibility.Visible : Visibility.Collapsed;
+        }
+
+        viewModeCombo.SelectionChanged += (s, e) =>
+        {
+            launcher.ViewMode = viewModeCombo.SelectedIndex;
+            SettingsManager.SaveSettings();
+            FlyoutWindow.InvalidateItems(launcher.Id);
+            UpdateIconModeControls();
+        };
+
+        UpdateIconModeControls();
 
         // ── Show title toggle ────────────────────────────────────
         var showTitleToggle = new ToggleSwitch
@@ -716,6 +752,7 @@ public sealed partial class LaunchersPage : Page
         panel.Children.Add(iconRow);
         panel.Children.Add(customIconRow);
         panel.Children.Add(viewModeRow);
+        panel.Children.Add(iconsPerRowRow);
         panel.Children.Add(showTitleRow);
         panel.Children.Add(hideRow);
         panel.Children.Add(taskbarRow);

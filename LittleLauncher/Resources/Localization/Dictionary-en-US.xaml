@@ -26,6 +26,8 @@
     <x:String x:Key="AppThemeDefault"> Windows Default</x:String>
     <x:String x:Key="AppThemeLight"> Light</x:String>
     <x:String x:Key="AppThemeDark"> Dark</x:String>
+    <x:String x:Key="FlyoutAnimationsTitle">Animate flyouts</x:String>
+    <x:String x:Key="FlyoutAnimationsDescription">Slide launcher flyouts in and out like the Start menu</x:String>
     <x:String x:Key="LaunchOnStartupTitle">Launch on Startup</x:String>
     <x:String x:Key="LaunchOnStartupDescription">Start minimized to tray when you log in to Windows</x:String>
     <x:String x:Key="StartupAppsHyperlinkText">Startup Apps</x:String>

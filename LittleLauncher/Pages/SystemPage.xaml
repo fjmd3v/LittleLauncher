@@ -29,6 +29,25 @@
             </Grid>
         </Border>
 
+        <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                BorderThickness="1" CornerRadius="4" Padding="16" Margin="0,0,0,4">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <FontIcon Glyph="&#xE7FC;" FontSize="20" Margin="0,0,16,0" VerticalAlignment="Center"/>
+                <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                    <TextBlock Text="{StaticResource FlyoutAnimationsTitle}" FontSize="14"/>
+                    <TextBlock Text="{StaticResource FlyoutAnimationsDescription}" FontSize="12" Opacity="0.5"/>
+                </StackPanel>
+                <ToggleSwitch Grid.Column="2" OnContent="" OffContent="" MinWidth="0"
+                              IsOn="{Binding FlyoutAnimationsEnabled, Mode=TwoWay}"/>
+            </Grid>
+        </Border>
+
         <TextBlock Text="Tray icon and per-launcher settings are managed on the Launchers page."
                    FontSize="12" Opacity="0.55" Margin="0,4,0,4"/>
 

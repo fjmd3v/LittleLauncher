@@ -54,6 +54,7 @@ applyTo: "{**/ViewModels/UserSettings*.cs,**/Models/Launcher.cs}"
 - `CustomTrayIconPath` (`[ObservableProperty]`)
 - `NIconHide` (`[ObservableProperty]`)
 - `ViewMode` (`[ObservableProperty]`)
+- `IconModeIconsPerRow` (`[ObservableProperty]`, default 3, clamped to 1–6, controls icon density in icon-mode flyouts and the launcher item editor)
 - `ShowTitle` (`[ObservableProperty]`, shows launcher name at top of flyout)
 - `Items: ObservableCollection<LauncherItem>`
 
@@ -78,5 +79,7 @@ Group related properties together with comment headers matching existing style:
 - Taskbar Widget
 - Launchers
 - SFTP Sync
+
+`UserSettings` appearance/behaviour properties currently include `AppTheme`, `Startup`, and `FlyoutAnimationsEnabled` (default `true`, controls whether `FlyoutWindow` uses animated open/close transitions).
 
 

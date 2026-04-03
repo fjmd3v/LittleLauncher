@@ -72,7 +72,9 @@ public partial class LauncherItemsPage : Page
     private const int ColumnLayoutPadding = 80;
     private const int ColumnSpacing = 12;
     private const int ListModeColumnWidth = 280;
-    private const int IconModeColumnWidth = 265;
+    private const int DefaultIconModeColumnWidth = 265;
+    private const int IconModeTileOuterWidth = 84;
+    private const int IconModeColumnChromeWidth = DefaultIconModeColumnWidth - (IconModeTileOuterWidth * Launcher.DefaultIconModeIconsPerRow);
 
     // -- Cached resources (created once, reused on every pointer/drag event) --
     private static readonly Microsoft.UI.Input.InputSystemCursor _sizeAllCursor =
@@ -88,6 +90,11 @@ public partial class LauncherItemsPage : Page
     // -- Column-based rendering state --
     private List<ObservableCollection<LauncherItem>> _columnLists = [];
     private readonly HashSet<LauncherItem> _syntheticGroups = [];
+
+    private static int GetIconModeIconsPerRow() =>
+        Launcher.ClampIconModeIconsPerRow(TargetLauncher?.IconModeIconsPerRow ?? Launcher.DefaultIconModeIconsPerRow);
+
+    private static int GetIconModeColumnWidth() => IconModeColumnChromeWidth + (GetIconModeIconsPerRow() * IconModeTileOuterWidth);
 
     public LauncherItemsPage()
     {
@@ -175,7 +182,7 @@ public partial class LauncherItemsPage : Page
         // Set up column definitions in the ColumnsPanel Grid.
         // Layout: [dropZone0] [col0] [dropZone1] [col1] ... [dropZoneN]
         // Grid columns: Auto, Fixed, Auto, Fixed, ..., Auto
-        int colFixedWidth = isIconMode ? IconModeColumnWidth : ListModeColumnWidth;
+        int colFixedWidth = isIconMode ? GetIconModeColumnWidth() : ListModeColumnWidth;
         for (int c = 0; c < _columnLists.Count; c++)
         {
             // Drop zone column (between previous column and this one, or before first)
@@ -320,10 +327,21 @@ public partial class LauncherItemsPage : Page
 
     private static ItemsPanelTemplate CreateWrapGridItemsPanel()
     {
+        return CreateWrapGridItemsPanel(GetIconModeIconsPerRow());
+    }
+
+    private static ItemsPanelTemplate CreateWrapGridItemsPanel(int iconsPerRow)
+    {
         var xaml = "<ItemsPanelTemplate xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation'>" +
-                   "<ItemsWrapGrid Orientation='Horizontal' MaximumRowsOrColumns='3'/>" +
+                   $"<ItemsWrapGrid Orientation='Horizontal' MaximumRowsOrColumns='{iconsPerRow}'/>" +
                    "</ItemsPanelTemplate>";
         return (ItemsPanelTemplate)Microsoft.UI.Xaml.Markup.XamlReader.Load(xaml);
+    }
+
+    private void IconModeWrapList_Loaded(object sender, RoutedEventArgs e)
+    {
+        if (sender is ListView listView)
+            listView.ItemsPanel = CreateWrapGridItemsPanel();
     }
 
     /// <summary>
@@ -1290,7 +1308,7 @@ public partial class LauncherItemsPage : Page
 
     private int CalculateTotalColumnsWidth()
     {
-        int colFixedWidth = TargetLauncher?.ViewMode != 1 ? IconModeColumnWidth : ListModeColumnWidth;
+        int colFixedWidth = TargetLauncher?.ViewMode != 1 ? GetIconModeColumnWidth() : ListModeColumnWidth;
         int cols = _columnLists.Count;
         int gaps = cols > 1 ? (cols - 1) * ColumnSpacing : 0;
         int natural = cols * colFixedWidth + gaps + ColumnLayoutPadding;

@@ -95,6 +95,12 @@ public class TrayIconModeJsonConverter : JsonConverter<string>
 /// </summary>
 public partial class Launcher : ObservableObject
 {
+    public const int MinIconModeIconsPerRow = 1;
+    public const int DefaultIconModeIconsPerRow = 3;
+    public const int MaxIconModeIconsPerRow = 6;
+
+    public static int ClampIconModeIconsPerRow(int value) => Math.Clamp(value, MinIconModeIconsPerRow, MaxIconModeIconsPerRow);
+
     /// <summary>
     /// Stable GUID-based identifier.
     /// Used as the key for per-launcher tray icons, flyout windows, and companion shortcuts.
@@ -124,10 +130,17 @@ public partial class Launcher : ObservableObject
 
     /// <summary>
     /// Flyout display mode for this launcher.
-    /// 0 = List (icon + name side by side), 1 = Icon (larger icon with name below, wrapping grid).
+    /// 0 = Icon (larger icon with name below, wrapping grid), 1 = List (icon + name side by side).
     /// </summary>
     [ObservableProperty]
     public partial int ViewMode { get; set; }
+
+    /// <summary>
+    /// Number of icons shown across each icon-mode column.
+    /// Defaults to 3 and is clamped to a sensible 1-6 range.
+    /// </summary>
+    [ObservableProperty]
+    public partial int IconModeIconsPerRow { get; set; } = DefaultIconModeIconsPerRow;
 
     /// <summary>When true, the launcher name is shown at the top of the flyout popup.</summary>
     [ObservableProperty]
