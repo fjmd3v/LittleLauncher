@@ -70,6 +70,23 @@ public static class TrayIconModes
     };
 }
 
+/// <summary>Integer constants for <see cref="Launcher.ViewMode"/>.</summary>
+public static class LauncherViewModes
+{
+    public const int Icon = 0;
+    public const int List = 1;
+    public const int SmallIcon = 2;
+
+    public static int Normalize(int value) => value switch
+    {
+        List => List,
+        SmallIcon => SmallIcon,
+        _ => Icon,
+    };
+
+    public static bool IsIconMode(int value) => Normalize(value) != List;
+}
+
 /// <summary>
 /// Reads TrayIconMode as a string. If the JSON token is a number (legacy format),
 /// converts it via <see cref="TrayIconModes.FromLegacyInt"/>.
@@ -130,7 +147,9 @@ public partial class Launcher : ObservableObject
 
     /// <summary>
     /// Flyout display mode for this launcher.
-    /// 0 = Icon (larger icon with name below, wrapping grid), 1 = List (icon + name side by side).
+    /// 0 = Icon (larger icon with name below, wrapping grid),
+    /// 1 = List (icon + name side by side),
+    /// 2 = Small Icon (tray-sized icon grid with no item labels).
     /// </summary>
     [ObservableProperty]
     public partial int ViewMode { get; set; }

@@ -53,7 +53,7 @@ applyTo: "{**/ViewModels/UserSettings*.cs,**/Models/Launcher.cs}"
 - `TrayIconMode` (`[ObservableProperty]`, `string` — uses `TrayIconModes` constants like `\"Composite\"`, `\"Blue\"`, etc. A `TrayIconModeJsonConverter` handles migration from legacy integer values)
 - `CustomTrayIconPath` (`[ObservableProperty]`)
 - `NIconHide` (`[ObservableProperty]`)
-- `ViewMode` (`[ObservableProperty]`)
+- `ViewMode` (`[ObservableProperty]`, `int` — `0 = Icons`, `1 = List`, `2 = Small Icons`; non-list values use icon-style column layout in the flyout/editor)
 - `IconModeIconsPerRow` (`[ObservableProperty]`, default 3, clamped to 1–12, controls icon density in icon-mode flyouts and the launcher item editor)
 - `ShowTitle` (`[ObservableProperty]`, shows launcher name at top of flyout)
 - `Items: ObservableCollection<LauncherItem>`

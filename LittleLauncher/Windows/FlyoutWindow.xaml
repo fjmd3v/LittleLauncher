@@ -5,7 +5,7 @@
     xmlns:local="using:LittleLauncher.Windows">
     <Grid
         x:Name="RootGrid"
-        MinHeight="80"
+        MinHeight="0"
         Background="Transparent"
         Padding="0">
 
@@ -25,6 +25,12 @@
                 GroupTemplate="{StaticResource IconGroupTemplate}"
                 SyntheticGroupTemplate="{StaticResource IconSyntheticGroupTemplate}"
                 ItemTemplate="{StaticResource IconItemTemplate}" />
+
+            <local:FlyoutItemTemplateSelector
+                x:Key="SmallIconItemTemplateSelector"
+                GroupTemplate="{StaticResource SmallIconGroupTemplate}"
+                SyntheticGroupTemplate="{StaticResource SmallIconSyntheticGroupTemplate}"
+                ItemTemplate="{StaticResource SmallIconItemTemplate}" />
 
             <DataTemplate x:Key="ListGroupTemplate">
                 <StackPanel Margin="0,6,0,0"
@@ -327,6 +333,32 @@
                 </Grid>
             </DataTemplate>
 
+            <DataTemplate x:Key="SmallIconItemTemplate">
+                <Grid Width="40" Height="40">
+                    <Grid HorizontalAlignment="Center"
+                          VerticalAlignment="Center">
+                        <Image Source="{Binding IconPath, Converter={StaticResource IconPathToImage}}"
+                               Visibility="{Binding IconPath, Converter={StaticResource IconPathToVisibility}}"
+                               Width="20"
+                               Height="20" />
+
+                        <Grid Visibility="{Binding IconPath, Converter={StaticResource IconPathToVisibility}, ConverterParameter=invert}">
+                            <FontIcon Glyph="{Binding IconGlyph}"
+                                      Visibility="{Binding IconGlyph, Converter={StaticResource IsFluentGlyph}}"
+                                      Foreground="{Binding IconColor, Converter={StaticResource IconColorToBrush}}"
+                                      FontSize="18" />
+
+                            <TextBlock Text="{Binding IconGlyph}"
+                                       Visibility="{Binding IconGlyph, Converter={StaticResource IsFluentGlyph}, ConverterParameter=invert}"
+                                       Foreground="{Binding IconColor, Converter={StaticResource IconColorToBrush}}"
+                                       FontSize="18"
+                                       HorizontalAlignment="Center"
+                                       VerticalAlignment="Center" />
+                        </Grid>
+                    </Grid>
+                </Grid>
+            </DataTemplate>
+
             <DataTemplate x:Key="IconGroupTemplate">
                 <StackPanel Margin="0,6,0,0">
                     <Grid Margin="8,0,8,4"
@@ -402,6 +434,64 @@
                     </ListView.ItemsPanel>
                 </ListView>
             </DataTemplate>
+
+            <DataTemplate x:Key="SmallIconGroupTemplate">
+                <StackPanel Margin="0,6,0,0">
+                    <ListView ItemsSource="{Binding Children}"
+                              Tag="{Binding}"
+                              CanDragItems="True"
+                              AllowDrop="True"
+                              IsItemClickEnabled="True"
+                              SelectionMode="None"
+                              MinHeight="0"
+                              Loaded="IconGroupChildList_Loaded"
+                              ScrollViewer.VerticalScrollBarVisibility="Disabled"
+                              ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                              ItemTemplate="{StaticResource SmallIconItemTemplate}"
+                              ItemContainerStyle="{StaticResource IconItemContainerStyle}"
+                              ItemClick="ItemsListControl_ItemClick"
+                              RightTapped="ItemsListControl_RightTapped"
+                              DragItemsStarting="GroupChildList_DragItemsStarting"
+                              DragOver="GroupChildList_DragOver"
+                              DragLeave="GroupChildList_DragLeave"
+                              Drop="GroupChildList_Drop"
+                              DragItemsCompleted="GroupChildList_DragItemsCompleted">
+                        <ListView.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <ItemsWrapGrid Orientation="Horizontal" MaximumRowsOrColumns="3" />
+                            </ItemsPanelTemplate>
+                        </ListView.ItemsPanel>
+                    </ListView>
+                </StackPanel>
+            </DataTemplate>
+
+            <DataTemplate x:Key="SmallIconSyntheticGroupTemplate">
+                <ListView ItemsSource="{Binding Children}"
+                          Tag="{Binding}"
+                          CanDragItems="True"
+                          AllowDrop="True"
+                          IsItemClickEnabled="True"
+                          SelectionMode="None"
+                          MinHeight="0"
+                          Loaded="IconGroupChildList_Loaded"
+                          ScrollViewer.VerticalScrollBarVisibility="Disabled"
+                          ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                          ItemTemplate="{StaticResource SmallIconItemTemplate}"
+                          ItemContainerStyle="{StaticResource IconItemContainerStyle}"
+                          ItemClick="ItemsListControl_ItemClick"
+                          RightTapped="ItemsListControl_RightTapped"
+                          DragItemsStarting="GroupChildList_DragItemsStarting"
+                          DragOver="GroupChildList_DragOver"
+                          DragLeave="GroupChildList_DragLeave"
+                          Drop="GroupChildList_Drop"
+                          DragItemsCompleted="GroupChildList_DragItemsCompleted">
+                    <ListView.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <ItemsWrapGrid Orientation="Horizontal" MaximumRowsOrColumns="3" />
+                        </ItemsPanelTemplate>
+                    </ListView.ItemsPanel>
+                </ListView>
+            </DataTemplate>
         </Grid.Resources>
 
         <Grid.ContextFlyout>
@@ -424,7 +514,7 @@
             </MenuFlyout>
         </Grid.ContextFlyout>
 
-        <StackPanel>
+        <StackPanel VerticalAlignment="Center">
             <TextBlock x:Name="LauncherTitle"
                        FontSize="12"
                        FontWeight="SemiBold"

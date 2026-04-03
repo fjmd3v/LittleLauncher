@@ -614,9 +614,26 @@ public sealed partial class LaunchersPage : Page
 
         // ── View mode combo ──────────────────────────────────────
         var viewModeCombo = new ComboBox { MinWidth = 160 };
-        viewModeCombo.Items.Add("Icons");
-        viewModeCombo.Items.Add("List");
-        viewModeCombo.SelectedIndex = Math.Clamp(launcher.ViewMode, 0, 1);
+        var viewModes = new[]
+        {
+            (Label: "Icons", Value: LauncherViewModes.Icon),
+            (Label: "Small Icons", Value: LauncherViewModes.SmallIcon),
+            (Label: "List", Value: LauncherViewModes.List),
+        };
+
+        foreach (var viewMode in viewModes)
+        {
+            viewModeCombo.Items.Add(new ComboBoxItem
+            {
+                Content = viewMode.Label,
+                Tag = viewMode.Value,
+            });
+        }
+
+        int selectedViewMode = LauncherViewModes.Normalize(launcher.ViewMode);
+        viewModeCombo.SelectedIndex = Array.FindIndex(viewModes, vm => vm.Value == selectedViewMode);
+        if (viewModeCombo.SelectedIndex < 0)
+            viewModeCombo.SelectedIndex = 0;
 
         var viewModeRow = new Grid();
         viewModeRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -659,12 +676,18 @@ public sealed partial class LaunchersPage : Page
 
         void UpdateIconModeControls()
         {
-            iconsPerRowRow.Visibility = viewModeCombo.SelectedIndex == 0 ? Visibility.Visible : Visibility.Collapsed;
+            int selectedMode = viewModeCombo.SelectedItem is ComboBoxItem selectedItem && selectedItem.Tag is int value
+                ? value
+                : LauncherViewModes.Icon;
+            iconsPerRowRow.Visibility = LauncherViewModes.IsIconMode(selectedMode) ? Visibility.Visible : Visibility.Collapsed;
         }
 
         viewModeCombo.SelectionChanged += (s, e) =>
         {
-            launcher.ViewMode = viewModeCombo.SelectedIndex;
+            if (viewModeCombo.SelectedItem is not ComboBoxItem selectedItem || selectedItem.Tag is not int viewMode)
+                return;
+
+            launcher.ViewMode = viewMode;
             SettingsManager.SaveSettings();
             FlyoutWindow.InvalidateItems(launcher.Id);
             UpdateIconModeControls();

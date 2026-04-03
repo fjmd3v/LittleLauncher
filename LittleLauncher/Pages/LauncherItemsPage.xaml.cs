@@ -171,7 +171,7 @@ public partial class LauncherItemsPage : Page
 
         // In icon mode, wrap consecutive ungrouped items into synthetic groups
         // so they use the wrapping grid layout
-        bool isIconMode = TargetLauncher?.ViewMode != 1;
+        bool isIconMode = LauncherViewModes.IsIconMode(TargetLauncher?.ViewMode ?? LauncherViewModes.Icon);
         if (isIconMode)
             WrapUngroupedItemsIntoSyntheticGroups();
 
@@ -1308,7 +1308,9 @@ public partial class LauncherItemsPage : Page
 
     private int CalculateTotalColumnsWidth()
     {
-        int colFixedWidth = TargetLauncher?.ViewMode != 1 ? GetIconModeColumnWidth() : ListModeColumnWidth;
+        int colFixedWidth = LauncherViewModes.IsIconMode(TargetLauncher?.ViewMode ?? LauncherViewModes.Icon)
+            ? GetIconModeColumnWidth()
+            : ListModeColumnWidth;
         int cols = _columnLists.Count;
         int gaps = cols > 1 ? (cols - 1) * ColumnSpacing : 0;
         int natural = cols * colFixedWidth + gaps + ColumnLayoutPadding;
