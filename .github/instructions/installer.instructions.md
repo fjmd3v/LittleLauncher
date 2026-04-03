@@ -59,7 +59,8 @@ For packaged installs, `UpdateService` takes a separate path through `Windows.Se
 2. Home/About pages reuse the same cached result shape as the MSI path and keep the same single-action UI
 3. Clicking `Download & Install` calls `RequestDownloadAndInstallStorePackageUpdatesAsync()` on the UI thread
 4. The `StoreContext` is associated with the Settings window handle via `InitializeWithWindow.Initialize(...)` so Store consent dialogs are correctly owned in the desktop app
-5. The OS displays the Store-managed download/install dialogs, then the app exits so the update can complete
+5. After the Store API reports success, `UpdateService` writes a small `.cmd` helper that waits for the current process to exit and then launches `explorer.exe shell:AppsFolder\<PackageFamilyName>!App`
+6. The app exits, the helper relaunches the packaged app, and the normal default launch path reopens Settings
 
 Only unpackaged installs show the custom update toast on startup. Packaged installs still prefetch update state at startup so Home/About can immediately surface available Store updates.
 

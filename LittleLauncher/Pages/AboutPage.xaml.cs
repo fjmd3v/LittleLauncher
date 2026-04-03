@@ -80,9 +80,7 @@ public partial class AboutPage : Page
 
             if (success)
             {
-                UpdateStatusText.Text = _updateResult.IsStoreManaged
-                    ? "The Microsoft Store will finish installing the update after the app closes."
-                    : "Installer will launch after the app closes.";
+                UpdateStatusText.Text = message;
                 await Task.Delay(1000);
                 Environment.Exit(0);
             }

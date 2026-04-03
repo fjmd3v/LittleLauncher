@@ -19,6 +19,7 @@ namespace LittleLauncher.Services;
 public static class UpdateService
 {
     private static readonly NLog.Logger Logger = NLog.LogManager.GetCurrentClassLogger();
+    private const string PackagedApplicationId = "App";
 
     public enum UpdateSource
     {
@@ -237,7 +238,7 @@ public static class UpdateService
                 WindowStyle = ProcessWindowStyle.Hidden,
             });
 
-            return (true, "Installer launched successfully.");
+            return (true, "Installer will launch after the app closes.");
         }
         catch (OperationCanceledException)
         {
@@ -281,7 +282,7 @@ public static class UpdateService
 
             return result.OverallState switch
             {
-                StorePackageUpdateState.Completed => (true, "Store update completed successfully."),
+                StorePackageUpdateState.Completed => (true, SchedulePackagedRelaunchAfterExit()),
                 StorePackageUpdateState.Canceled => (false, "Update was cancelled in the Microsoft Store dialog."),
                 StorePackageUpdateState.ErrorLowBattery => (false, "Update paused because the device battery is too low."),
                 StorePackageUpdateState.ErrorWiFiRecommended => (false, "Update was paused because a non-metered connection is recommended."),
@@ -348,6 +349,47 @@ public static class UpdateService
         }
 
         return "The Microsoft Store could not install the update. Try again later.";
+    }
+
+    private static string SchedulePackagedRelaunchAfterExit()
+    {
+        try
+        {
+            string aumid = $"{Package.Current.Id.FamilyName}!{PackagedApplicationId}";
+            string tempDir = Path.Combine(Path.GetTempPath(), "LittleLauncher-Update");
+            Directory.CreateDirectory(tempDir);
+
+            int pid = Environment.ProcessId;
+            string scriptPath = Path.Combine(tempDir, "restart-store-update.cmd");
+            string script = $"""
+                @echo off
+                :wait
+                tasklist /FI "PID eq {pid}" 2>NUL | find /I "{pid}" >NUL
+                if not errorlevel 1 (
+                    timeout /t 1 /nobreak >NUL
+                    goto wait
+                )
+                timeout /t 2 /nobreak >NUL
+                start "" explorer.exe "shell:AppsFolder\{aumid}"
+                """;
+            File.WriteAllText(scriptPath, script);
+
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = "cmd.exe",
+                Arguments = $"/c \"{scriptPath}\"",
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                WindowStyle = ProcessWindowStyle.Hidden,
+            });
+
+            return "Little Launcher will relaunch after the Microsoft Store finishes applying the update.";
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn(ex, "Failed to schedule relaunch after Microsoft Store update");
+            return "Update installed. Restart Little Launcher manually if it does not relaunch automatically.";
+        }
     }
 
     private static Version? ParseVersion(string tag)

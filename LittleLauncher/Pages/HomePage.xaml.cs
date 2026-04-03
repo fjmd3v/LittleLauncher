@@ -114,9 +114,7 @@ public partial class HomePage : Page
 
             if (success)
             {
-                UpdateInfoBar.Message = _updateResult.IsStoreManaged
-                    ? "The Microsoft Store will finish installing the update after the app closes."
-                    : "Installer will launch after the app closes.";
+                UpdateInfoBar.Message = message;
                 UpdateInfoBar.Severity = InfoBarSeverity.Success;
                 await Task.Delay(1000);
                 Environment.Exit(0);
