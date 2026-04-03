@@ -58,6 +58,7 @@ Release builds AOT-publish the companion exe (`LauncherShortcut`) automatically.
 
 ## Dependencies
 
+- Microsoft.WindowsDesktop.App (framework reference for `System.Windows.Automation` taskbar button detection)
 - Microsoft.WindowsAppSDK 1.8.260209005 (WinUI 3)
 - H.NotifyIcon.WinUI 2.4.1 (system tray)
 - CommunityToolkit.Mvvm 8.4.0

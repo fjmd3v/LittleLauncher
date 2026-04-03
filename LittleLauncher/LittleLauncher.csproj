@@ -19,6 +19,8 @@
 
   <!-- NuGet packages ────────────────────────────────────────────── -->
   <ItemGroup>
+    <FrameworkReference Include="Microsoft.WindowsDesktop.App" />
+
     <!-- WinUI 3 (Windows App SDK) — Fluent Design, Mica, NavigationView -->
     <PackageReference Include="Microsoft.Data.Sqlite" Version="9.0.3" />
     <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.8.260209005" />
