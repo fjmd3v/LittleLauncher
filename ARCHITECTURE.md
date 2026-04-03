@@ -130,4 +130,4 @@ At startup, `EnsureFlyoutShortcut()` copies the companion exe to `%AppData%\\Lit
 - **Image assets** in `LittleLauncherMSIX/Images/` use standard MRT naming qualifiers (e.g. `.scale-200.`, `.targetsize-48.`) and are indexed into `resources.pri` by `makepri`.
 - **Companion exe** is deployed to `%AppData%\\LittleLauncher\\` at startup for all build types. See \"Companion exe\" section above.
 - **`-NoSign` flag** skips all signing for Store uploads (Microsoft re-signs during ingestion). Without `-NoSign`, the script signs with a self-signed dev cert or a trusted PFX.
-- **Update checks and toast notifications** are disabled in MSIX builds — the Store handles updates. The GitHub-based update UI on Home/About pages is hidden.
+- **Updates use two runtime paths**: unpackaged/WiX installs use the GitHub Releases + MSI updater, while packaged installs use `Windows.Services.Store.StoreContext` to check for Microsoft Store updates and request download/install from the Store. Startup prefetch runs for both so Home/About can reuse the cached result. Only unpackaged builds show the custom toast notification because the packaged path uses Store-managed UI instead.

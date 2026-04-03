@@ -2,6 +2,7 @@ using LittleLauncher.Services;
 using System.Diagnostics;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using WinRT.Interop;
 
 namespace LittleLauncher.Pages;
 
@@ -13,8 +14,6 @@ public partial class AboutPage : Page
     public AboutPage()
     {
         InitializeComponent();
-        if (MainWindow.IsPackaged)
-            UpdateCard.Visibility = Visibility.Collapsed;
     }
 
     private async void CheckForUpdates_Click(object sender, RoutedEventArgs e)
@@ -33,8 +32,10 @@ public partial class AboutPage : Page
             else if (result.UpdateAvailable)
             {
                 _updateResult = result;
-                UpdateStatusText.Text = $"Version {result.LatestVersion} is available (you have {result.CurrentVersion})";
-                CheckUpdateButton.Content = string.IsNullOrEmpty(result.MsiDownloadUrl)
+                UpdateStatusText.Text = result.IsStoreManaged
+                    ? $"Version {result.LatestVersion} is available in the Microsoft Store (you have {result.CurrentVersion})"
+                    : $"Version {result.LatestVersion} is available (you have {result.CurrentVersion})";
+                CheckUpdateButton.Content = !result.IsStoreManaged && string.IsNullOrEmpty(result.MsiDownloadUrl)
                     ? "View Release"
                     : "Download & Install";
                 CheckUpdateButton.IsEnabled = true;
@@ -61,7 +62,7 @@ public partial class AboutPage : Page
     {
         if (_updateResult == null) return;
 
-        if (!string.IsNullOrEmpty(_updateResult.MsiDownloadUrl))
+        if (_updateResult.IsStoreManaged || !string.IsNullOrEmpty(_updateResult.MsiDownloadUrl))
         {
             CheckUpdateButton.IsEnabled = false;
             CheckUpdateButton.Content = "Downloading...";
@@ -73,11 +74,15 @@ public partial class AboutPage : Page
             });
 
             var (success, message) = await UpdateService.DownloadAndInstallAsync(
-                _updateResult.MsiDownloadUrl, progress);
+                _updateResult,
+                GetOwnerWindowHandle(),
+                progress);
 
             if (success)
             {
-                UpdateStatusText.Text = "Installer will launch after the app closes.";
+                UpdateStatusText.Text = _updateResult.IsStoreManaged
+                    ? "The Microsoft Store will finish installing the update after the app closes."
+                    : "Installer will launch after the app closes.";
                 await Task.Delay(1000);
                 Environment.Exit(0);
             }
@@ -92,5 +97,12 @@ public partial class AboutPage : Page
         {
             Process.Start(new ProcessStartInfo(_updateResult.ReleaseUrl) { UseShellExecute = true });
         }
+    }
+
+    private static nint GetOwnerWindowHandle()
+    {
+        Window? owner = SettingsWindow.GetCurrent();
+        owner ??= MainWindow.Current;
+        return owner == null ? 0 : WindowNative.GetWindowHandle(owner);
     }
 }

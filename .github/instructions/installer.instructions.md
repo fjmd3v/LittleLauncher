@@ -51,6 +51,18 @@ A `CustomAction` in `Package.wxs` launches `LittleLauncher.exe` after `InstallFi
 3. MSI's `CustomAction` auto-launches the app in the tray
 4. Script launches `LittleLauncher.exe --settings` — the single-instance mutex detects the running app and sends `LittleLauncher_ShowSettings`, re-opening the Settings window
 
+## MSIX / Store update flow
+
+For packaged installs, `UpdateService` takes a separate path through `Windows.Services.Store.StoreContext` instead of GitHub Releases:
+
+1. `CheckForUpdateAsync()` calls `GetAppAndOptionalStorePackageUpdatesAsync()` to detect Store updates
+2. Home/About pages reuse the same cached result shape as the MSI path and keep the same single-action UI
+3. Clicking `Download & Install` calls `RequestDownloadAndInstallStorePackageUpdatesAsync()` on the UI thread
+4. The `StoreContext` is associated with the Settings window handle via `InitializeWithWindow.Initialize(...)` so Store consent dialogs are correctly owned in the desktop app
+5. The OS displays the Store-managed download/install dialogs, then the app exits so the update can complete
+
+Only unpackaged installs show the custom update toast on startup. Packaged installs still prefetch update state at startup so Home/About can immediately surface available Store updates.
+
 ## Uninstall cleanup
 
 Before file removal, WiX `util:CloseApplication` targets `LittleLauncher.exe` on `REMOVE="ALL"`. It sends a normal close message, then an end-session message, waits 5 seconds, and force-terminates the process if it is still running. This keeps explicit uninstalls and major-upgrade removal from racing the running tray process.
@@ -66,4 +78,4 @@ On `REMOVE="ALL" AND NOT UPGRADINGPRODUCTCODE`, a `CustomAction` runs `cleanup-u
 
 The action uses `Return="check"` so the uninstall does not report completion until the cleanup script has finished.
 
-**MSIX limitation:** MSIX has no custom uninstall actions. When an MSIX package is removed, Windows deletes the package files, its own Start Menu entry, **and all VFS-redirected data** (settings, cached icons, companion exe) because the entire `%LocalAppData%\Packages\{PFN}\` tree is removed. Pinned taskbar shortcuts survive as dead `.lnk` files — Windows 11 eventually detects and offers to remove stale pins. Settings **do** survive MSIX upgrades — Windows preserves package data during version updates.
+**MSIX limitation:** MSIX has no custom uninstall actions. When an MSIX package is removed, Windows deletes the package files, its own Start Menu entry, **and all VFS-redirected data** (settings, cached icons, companion exe) because the entire `%LocalAppData%\Packages\{PFN}\` tree is removed. Pinned taskbar shortcuts survive as dead `.lnk` files — Windows 11 eventually detects and offers to remove stale pins. Settings **do** survive MSIX upgrades — Windows preserves package data during version updates, including updates initiated through the Store API path above.

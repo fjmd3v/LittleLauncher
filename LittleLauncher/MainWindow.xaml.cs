@@ -182,15 +182,15 @@ public sealed partial class MainWindow : Window
         _ = FetchMissingIconsOnStartupAsync();
 
         // Register for Windows toast notifications (may fail in packaged/MSIX builds
-        // that lack a COM activator declaration — non-critical, only used for update toasts)
-        // Toast notifications + GitHub update checks are only for non-Store builds.
-        // The Store handles updates and doesn't support custom toast COM activation.
+        // that lack a COM activator declaration — non-critical, only used for update toasts).
+        // Packaged builds still prefetch update availability for the Home/About UI,
+        // but only unpackaged builds show the custom toast notification.
         if (!IsPackaged)
         {
             try { Microsoft.Windows.AppNotifications.AppNotificationManager.Default.Register(); }
             catch (Exception ex) { Logger.Warn(ex, "Toast notification registration failed"); }
-            _ = CheckForUpdateOnStartupAsync();
         }
+        _ = CheckForUpdateOnStartupAsync();
 
         // Tell Windows to include --silent when auto-restarting the app
         // (e.g. "Restart apps" after sign-in). Without this, Windows
@@ -1107,8 +1107,9 @@ public sealed partial class MainWindow : Window
     }
 
     /// <summary>
-    /// Checks for app updates on startup and shows a toast notification
-    /// if a newer version is available. The result is cached in
+    /// Checks for app updates on startup. In unpackaged builds this also shows
+    /// a toast notification; in packaged builds it only caches the result for UI use.
+    /// The result is cached in
     /// <see cref="UpdateService.LatestResult"/> for the HomePage to consume.
     /// </summary>
     private async Task CheckForUpdateOnStartupAsync()
@@ -1117,6 +1118,7 @@ public sealed partial class MainWindow : Window
         {
             var result = await UpdateService.CheckForUpdateAsync();
             if (result is not { UpdateAvailable: true }) return;
+            if (IsPackaged) return;
 
             var builder = new Microsoft.Windows.AppNotifications.Builder.AppNotificationBuilder()
                 .AddText("Update Available")

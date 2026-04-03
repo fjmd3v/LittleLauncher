@@ -81,5 +81,8 @@
     <x:String x:Key="UpToDate">You're up to date</x:String>
     <x:String x:Key="UpdateCheckFailed">Unable to check for updates</x:String>
     <x:String x:Key="ViewRelease">View Release</x:String>
+    <x:String x:Key="StoreUpdateAvailableStatus">A new version is available in the Microsoft Store.</x:String>
+    <x:String x:Key="StoreInstallAfterClose">The Microsoft Store will finish installing the update after the app closes.</x:String>
+    <x:String x:Key="StoreNoUpdatesAvailable">No updates are currently available in the Microsoft Store.</x:String>
 </ResourceDictionary>
 

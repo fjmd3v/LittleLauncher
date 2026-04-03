@@ -9,6 +9,7 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media.Imaging;
+using WinRT.Interop;
 
 namespace LittleLauncher.Pages;
 
@@ -26,8 +27,7 @@ public partial class HomePage : Page
         LoadAppIcon();
         VersionTextBlock.Text = SettingsManager.Current.LastKnownVersion;
         BuildTypeTextBlock.Text = GetBuildTypeLabel();
-        if (!MainWindow.IsPackaged)
-            _ = CheckForUpdateAsync();
+        _ = CheckForUpdateAsync();
     }
 
     private static string GetBuildTypeLabel()
@@ -71,12 +71,18 @@ public partial class HomePage : Page
             if (result is { UpdateAvailable: true })
             {
                 _updateResult = result;
-                UpdateInfoBar.Message = $"A new version ({result.LatestVersion}) is available. You are running {result.CurrentVersion}.";
+                UpdateInfoBar.Message = result.IsStoreManaged
+                    ? $"A new version ({result.LatestVersion}) is available in the Microsoft Store. You are running {result.CurrentVersion}."
+                    : $"A new version ({result.LatestVersion}) is available. You are running {result.CurrentVersion}.";
                 UpdateInfoBar.IsOpen = true;
 
-                if (string.IsNullOrEmpty(result.MsiDownloadUrl))
+                if (!result.IsStoreManaged && string.IsNullOrEmpty(result.MsiDownloadUrl))
                 {
                     UpdateActionButton.Content = "View Release";
+                }
+                else
+                {
+                    UpdateActionButton.Content = "Download & Install";
                 }
             }
         }
@@ -90,7 +96,7 @@ public partial class HomePage : Page
     {
         if (_updateResult == null) return;
 
-        if (!string.IsNullOrEmpty(_updateResult.MsiDownloadUrl))
+        if (_updateResult.IsStoreManaged || !string.IsNullOrEmpty(_updateResult.MsiDownloadUrl))
         {
             UpdateActionButton.IsEnabled = false;
             UpdateActionButton.Content = "Downloading...";
@@ -102,11 +108,15 @@ public partial class HomePage : Page
             });
 
             var (success, message) = await UpdateService.DownloadAndInstallAsync(
-                _updateResult.MsiDownloadUrl, progress);
+                _updateResult,
+                GetOwnerWindowHandle(),
+                progress);
 
             if (success)
             {
-                UpdateInfoBar.Message = "Installer will launch after the app closes.";
+                UpdateInfoBar.Message = _updateResult.IsStoreManaged
+                    ? "The Microsoft Store will finish installing the update after the app closes."
+                    : "Installer will launch after the app closes.";
                 UpdateInfoBar.Severity = InfoBarSeverity.Success;
                 await Task.Delay(1000);
                 Environment.Exit(0);
@@ -123,6 +133,13 @@ public partial class HomePage : Page
         {
             Process.Start(new ProcessStartInfo(_updateResult.ReleaseUrl) { UseShellExecute = true });
         }
+    }
+
+    private static nint GetOwnerWindowHandle()
+    {
+        Window? owner = SettingsWindow.GetCurrent();
+        owner ??= MainWindow.Current;
+        return owner == null ? 0 : WindowNative.GetWindowHandle(owner);
     }
 
     private void LauncherItems_Click(object sender, PointerRoutedEventArgs e)

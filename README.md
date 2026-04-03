@@ -64,6 +64,7 @@ Little Launcher lives in the Windows system tray and/or taskbar. Clicking its ic
 - **Shared launchers** — share individual launchers via local/network files or per-launcher SFTP. Owners publish items; subscribers receive read-only copies.
 - **Export & import** — back up and restore items locally via JSON.
 - **Bookmark import** — import bookmarks directly from Chrome, Edge, Firefox, or any browser's exported HTML bookmarks file into a launcher.
+- **Update paths per install type** — unpackaged/WiX installs update via GitHub Releases + MSI, while Microsoft Store installs can check for and apply updates through the Store from inside the app.
 
 ## Architecture
 
