@@ -33,6 +33,7 @@ public partial class FlyoutWindow : Window
     private const int IconCellHeight = 84;
     private const int IconSize = 32;
     private const int IconColumnChromeWidth = DefaultIconColumnWidth - (IconCellWidth * Launcher.DefaultIconModeIconsPerRow);
+    private const int ResizeGripWidth = 4;
     private const double SlideDistanceDip = 36;
     private const uint ShowAnimationDurationMs = 200;
     private const uint HideAnimationDurationMs = 160;
@@ -48,11 +49,18 @@ public partial class FlyoutWindow : Window
     private bool _toolWindowStyleApplied;
     private int _lastItemsHash;
     private MainWindow? _owner;
+    private ResizeGrip _leftResizeGrip = null!;
+    private ResizeGrip _rightResizeGrip = null!;
     private IntPtr _hwnd;
     private SUBCLASSPROC? _wndProcDelegate;
     private bool _isShowing;
     private bool _isHiding;
     private int _animationVersion;
+    private bool _isResizingIconWidth;
+    private bool _resizeFromLeft;
+    private bool _resizeChangedSetting;
+    private int _resizeStartCursorX;
+    private int _resizeStartIconsPerRow;
     private readonly Launcher _launcher;  // The launcher this window displays
     private FlyoutEntranceEdge _lastEntranceEdge = FlyoutEntranceEdge.Bottom;
 
@@ -71,6 +79,7 @@ public partial class FlyoutWindow : Window
     }
 
     private static bool AreAnimationsEnabled => SettingsManager.Current.FlyoutAnimationsEnabled;
+    private bool IsIconMode => _launcher.ViewMode != 1;
 
     private FlyoutWindow(MainWindow owner, Launcher launcher)
     {
@@ -86,6 +95,7 @@ public partial class FlyoutWindow : Window
         presenter.IsAlwaysOnTop = true;
         GetAppWindow().SetPresenter(presenter);
 
+        InitializeResizeGrips();
         RebuildColumnsPanel();
 
         // Desktop Acrylic blurs whatever is behind the window (including other windows),
@@ -109,7 +119,7 @@ public partial class FlyoutWindow : Window
 
     private void FlyoutWindow_Activated(object sender, WindowActivatedEventArgs args)
     {
-        if (_isShowing) return;
+        if (_isShowing || _isResizingIconWidth) return;
         if (args.WindowActivationState == WindowActivationState.Deactivated)
             HideFlyout();
     }
@@ -122,6 +132,7 @@ public partial class FlyoutWindow : Window
             _lastDismissed = DateTime.UtcNow;
             return IntPtr.Zero;
         }
+
         return DefSubclassProc(hwnd, msg, wParam, lParam);
     }
 
@@ -467,6 +478,33 @@ public partial class FlyoutWindow : Window
         return lv;
     }
 
+    private void InitializeResizeGrips()
+    {
+        _leftResizeGrip = CreateResizeGrip(HorizontalAlignment.Left);
+        _rightResizeGrip = CreateResizeGrip(HorizontalAlignment.Right);
+        RootGrid.Children.Add(_leftResizeGrip);
+        RootGrid.Children.Add(_rightResizeGrip);
+    }
+
+    private ResizeGrip CreateResizeGrip(HorizontalAlignment alignment)
+    {
+        var grip = new ResizeGrip
+        {
+            Width = 10,
+            Background = new SolidColorBrush(Colors.Transparent),
+            HorizontalAlignment = alignment,
+            VerticalAlignment = VerticalAlignment.Stretch,
+            Visibility = Visibility.Collapsed,
+        };
+
+        grip.SetValue(Canvas.ZIndexProperty, 10);
+        grip.PointerPressed += ResizeGrip_PointerPressed;
+        grip.PointerMoved += ResizeGrip_PointerMoved;
+        grip.PointerReleased += ResizeGrip_PointerReleased;
+        grip.PointerCaptureLost += ResizeGrip_PointerCaptureLost;
+        return grip;
+    }
+
     // ── Icon mode rendering ─────────────────────────────────────────
 
     private int GetIconModeIconsPerRow() => Launcher.ClampIconModeIconsPerRow(_launcher.IconModeIconsPerRow);
@@ -511,6 +549,19 @@ public partial class FlyoutWindow : Window
             totalWidth += GetIconColumnWidth(column);
 
         return totalWidth;
+    }
+
+    private int GetIconResizeStepWidth()
+    {
+        int columnCount = Math.Max(1, BuildColumnLists().Count);
+        return Math.Max(IconCellWidth, columnCount * IconCellWidth);
+    }
+
+    private void UpdateResizeGripVisibility()
+    {
+        var visibility = IsIconMode ? Visibility.Visible : Visibility.Collapsed;
+        _leftResizeGrip.Visibility = visibility;
+        _rightResizeGrip.Visibility = visibility;
     }
 
     private ScrollViewer CreateIconModeColumn(ObservableCollection<LauncherItem> items)
@@ -675,6 +726,7 @@ public partial class FlyoutWindow : Window
     private void RebuildColumnsPanel()
     {
         ColumnsPanel.Children.Clear();
+        UpdateResizeGripVisibility();
 
         // Show/hide launcher title at the top
         if (_launcher.ShowTitle)
@@ -825,6 +877,150 @@ public partial class FlyoutWindow : Window
         var edge = nearTop ? FlyoutEntranceEdge.Top : FlyoutEntranceEdge.Bottom;
         int startTop = edge == FlyoutEntranceEdge.Top ? top - slideDistance : top + slideDistance;
         return new FlyoutPlacement(left, top, startTop, flyoutWidth, flyoutHeight, edge);
+    }
+
+    private void ResizeGrip_PointerPressed(object sender, PointerRoutedEventArgs e)
+    {
+        if (!IsIconMode || sender is not ResizeGrip grip)
+            return;
+
+        _isResizingIconWidth = true;
+        _resizeFromLeft = ReferenceEquals(sender, _leftResizeGrip);
+        _resizeChangedSetting = false;
+        _resizeStartIconsPerRow = GetIconModeIconsPerRow();
+        GetCursorPos(out var pt);
+        _resizeStartCursorX = pt.X;
+        _animationVersion++;
+        _isHiding = false;
+        _isShowing = false;
+
+        grip.CapturePointer(e.Pointer);
+        grip.SetResizeCursorActive(true);
+        e.Handled = true;
+    }
+
+    private void ResizeGrip_PointerMoved(object sender, PointerRoutedEventArgs e)
+    {
+        if (!_isResizingIconWidth)
+            return;
+
+        GetCursorPos(out var pt);
+        int dragDistance = _resizeFromLeft ? _resizeStartCursorX - pt.X : pt.X - _resizeStartCursorX;
+        int stepWidth = GetIconResizeStepWidth();
+        int deltaSteps = (int)Math.Round((double)dragDistance / stepWidth, MidpointRounding.AwayFromZero);
+        int targetIconsPerRow = Launcher.ClampIconModeIconsPerRow(_resizeStartIconsPerRow + deltaSteps);
+
+        ApplyIconModeResize(targetIconsPerRow, keepRightEdge: _resizeFromLeft);
+        e.Handled = true;
+    }
+
+    private void ResizeGrip_PointerReleased(object sender, PointerRoutedEventArgs e)
+    {
+        CompleteIconResize(sender as ResizeGrip);
+        e.Handled = true;
+    }
+
+    private void ResizeGrip_PointerCaptureLost(object sender, PointerRoutedEventArgs e)
+    {
+        CompleteIconResize(sender as ResizeGrip);
+    }
+
+    private void CompleteIconResize(ResizeGrip? grip)
+    {
+        if (!_isResizingIconWidth) return;
+
+        grip?.ReleasePointerCaptures();
+
+        _isResizingIconWidth = false;
+        _leftResizeGrip.SetResizeCursorActive(false);
+        _rightResizeGrip.SetResizeCursorActive(false);
+
+        if (_resizeChangedSetting)
+            SettingsManager.SaveSettings();
+    }
+
+    private void ApplyIconModeResize(int iconsPerRow, bool keepRightEdge)
+    {
+        int clamped = Launcher.ClampIconModeIconsPerRow(iconsPerRow);
+        if (_launcher.IconModeIconsPerRow == clamped)
+            return;
+
+        _launcher.IconModeIconsPerRow = clamped;
+        _resizeChangedSetting = true;
+        RebuildColumnsPanel();
+        _lastItemsHash = ComputeItemsHash(_launcher);
+        ResizeWindowToCurrentContent(keepRightEdge);
+    }
+
+    private void ResizeWindowToCurrentContent(bool keepRightEdge)
+    {
+        if (_hwnd == IntPtr.Zero || !IsWindow(_hwnd))
+            return;
+
+        GetWindowRect(_hwnd, out var rect);
+        double dpiScale = GetDpiForWindow(_hwnd) / 96.0;
+        if (dpiScale <= 0) dpiScale = 1.0;
+
+        int newWidth = (int)Math.Ceiling(GetFlyoutWidth() * dpiScale);
+        int newHeight = (int)Math.Ceiling(MeasureContentHeight() * dpiScale);
+        int left = keepRightEdge ? rect.Right - newWidth : rect.Left;
+        int top = _lastEntranceEdge == FlyoutEntranceEdge.Top ? rect.Top : rect.Bottom - newHeight;
+
+        var centerPoint = new POINT
+        {
+            X = rect.Left + ((rect.Right - rect.Left) / 2),
+            Y = rect.Top + ((rect.Bottom - rect.Top) / 2)
+        };
+        IntPtr hMonitor = MonitorFromPoint(centerPoint, MONITOR_DEFAULTTONEAREST);
+        var monitorInfo = new MONITORINFOEX { cbSize = Marshal.SizeOf<MONITORINFOEX>() };
+        GetMonitorInfo(hMonitor, ref monitorInfo);
+        var workArea = monitorInfo.rcWork;
+
+        if (left < workArea.Left) left = workArea.Left;
+        if (left + newWidth > workArea.Right) left = workArea.Right - newWidth;
+        if (top < workArea.Top) top = workArea.Top;
+        if (top + newHeight > workArea.Bottom) top = workArea.Bottom - newHeight;
+
+        SetWindowPos(_hwnd, 0, left, top, newWidth, newHeight,
+            SWP_NOZORDER | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS);
+    }
+
+    private sealed class ResizeGrip : Grid
+    {
+        private bool _forceResizeCursor;
+
+        public ResizeGrip()
+        {
+            PointerEntered += ResizeGrip_PointerEntered;
+            PointerExited += ResizeGrip_PointerExited;
+            PointerCaptureLost += ResizeGrip_PointerCaptureLost;
+        }
+
+        public void SetResizeCursorActive(bool active)
+        {
+            _forceResizeCursor = active;
+            ProtectedCursor = Microsoft.UI.Input.InputSystemCursor.Create(
+                active ? Microsoft.UI.Input.InputSystemCursorShape.SizeWestEast : Microsoft.UI.Input.InputSystemCursorShape.Arrow);
+        }
+
+        private void ResizeGrip_PointerEntered(object sender, PointerRoutedEventArgs e)
+        {
+            ProtectedCursor = Microsoft.UI.Input.InputSystemCursor.Create(Microsoft.UI.Input.InputSystemCursorShape.SizeWestEast);
+        }
+
+        private void ResizeGrip_PointerExited(object sender, PointerRoutedEventArgs e)
+        {
+            if (_forceResizeCursor)
+                return;
+
+            ProtectedCursor = Microsoft.UI.Input.InputSystemCursor.Create(Microsoft.UI.Input.InputSystemCursorShape.Arrow);
+        }
+
+        private void ResizeGrip_PointerCaptureLost(object sender, PointerRoutedEventArgs e)
+        {
+            _forceResizeCursor = false;
+            ProtectedCursor = Microsoft.UI.Input.InputSystemCursor.Create(Microsoft.UI.Input.InputSystemCursorShape.Arrow);
+        }
     }
 
     // ── Event handlers ──────────────────────────────────────────────
