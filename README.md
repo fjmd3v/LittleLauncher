@@ -57,6 +57,7 @@ Little Launcher lives in the Windows system tray and/or taskbar. Clicking its ic
 - **Application & website shortcuts** — launch any executable or URL with one click from the flyout.
 - **View modes** — choose between list view (icon + name) or icon grid view for each launcher.
 - **Groups & columns** — organise items into groups and multi-column layouts.
+- **Direct flyout reordering** — drag items in the live flyout to reorder them, with the same insertion-indicator style used in the editor.
 - **System-tray icons** — a tray icon that opens a flyout popup for shortcuts.
 - **Taskbar icons** — a companion helper exe (`LauncherShortcut`) can be pinned to the taskbar so one click opens the flyout without needing to find the tray icon.
 - **SSH/SFTP settings sync** — upload/download all launchers to a remote server using SSH.NET.
@@ -69,7 +70,7 @@ Little Launcher lives in the Windows system tray and/or taskbar. Clicking its ic
 | Layer | Description |
 |---|---|
 | `MainWindow` | Invisible host window. Owns the system-tray icon (`H.NotifyIcon`). Enforces single-instance via Mutex. Cross-process IPC via registered window messages. |
-| `FlyoutWindow` | A popup window that displays launcher items in list or icon grid view, positioned above the taskbar. Dismissed on focus loss or Escape. |
+| `FlyoutWindow` | A popup window that displays launcher items in list or icon grid view, positioned above the taskbar. Dismissed on focus loss or Escape. Supports direct drag-and-drop reordering and icon-grid edge resizing. |
 | `SettingsWindow` | WinUI 3 window with `MicaBackdrop` and `NavigationView` — pages for Home, Launchers, Launcher Items, Cloud Sync, Settings, and About. |
 | `SftpSyncService` | Static async methods for upload/download/test-connection using SSH.NET (`Renci.SshNet`). Also handles per-launcher shared sync (file or SFTP). Supports private-key and password auth. |
 | `AutoSyncService` | Manages automatic sync: startup download, debounced upload, periodic download, and shared launcher sync. |

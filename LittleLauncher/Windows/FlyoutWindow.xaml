@@ -16,31 +16,169 @@
             <local:IconColorToBrushConverter x:Key="IconColorToBrush" />
 
             <local:FlyoutItemTemplateSelector
-                x:Key="ItemTemplateSelector"
-                GroupTemplate="{StaticResource GroupTemplate}"
+                x:Key="ListItemTemplateSelector"
+                GroupTemplate="{StaticResource ListGroupTemplate}"
                 ItemTemplate="{StaticResource LauncherItemTemplate}" />
 
-            <!-- Group heading row -->
-            <DataTemplate x:Key="GroupTemplate">
-                <Grid Margin="0,6,0,0"
-                      HorizontalAlignment="Stretch">
-                    <TextBlock
-                        Text="{Binding Name}"
-                        FontSize="12"
-                        FontWeight="SemiBold"
-                        Opacity="0.7"
-                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                        VerticalAlignment="Center"
-                        TextWrapping="NoWrap"
-                        TextTrimming="CharacterEllipsis" />
-                </Grid>
+            <local:FlyoutItemTemplateSelector
+                x:Key="IconItemTemplateSelector"
+                GroupTemplate="{StaticResource IconGroupTemplate}"
+                SyntheticGroupTemplate="{StaticResource IconSyntheticGroupTemplate}"
+                ItemTemplate="{StaticResource IconItemTemplate}" />
+
+            <DataTemplate x:Key="ListGroupTemplate">
+                <StackPanel Margin="0,6,0,0"
+                            HorizontalAlignment="Stretch">
+                    <Grid Margin="8,0,8,2"
+                          HorizontalAlignment="Stretch"
+                                                    ColumnSpacing="8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+
+                                                <TextBlock Grid.Column="0"
+                                   Text="{Binding Name}"
+                                   FontSize="12"
+                                   FontWeight="SemiBold"
+                                   Opacity="0.7"
+                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                   VerticalAlignment="Center"
+                                   TextWrapping="NoWrap"
+                                   TextTrimming="CharacterEllipsis" />
+                    </Grid>
+
+                    <ListView ItemsSource="{Binding Children}"
+                              Tag="{Binding}"
+                              HorizontalAlignment="Stretch"
+                              CanDragItems="True"
+                              AllowDrop="True"
+                              Loaded="ListGroupChildList_Loaded"
+                              IsItemClickEnabled="True"
+                              SelectionMode="None"
+                              MinHeight="0"
+                              ScrollViewer.VerticalScrollBarVisibility="Disabled"
+                              ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                              ItemTemplate="{StaticResource LauncherItemTemplate}"
+                              ItemContainerStyle="{StaticResource LauncherItemContainerStyle}"
+                              ItemClick="ItemsListControl_ItemClick"
+                              RightTapped="ItemsListControl_RightTapped"
+                              DragItemsStarting="GroupChildList_DragItemsStarting"
+                              DragOver="GroupChildList_DragOver"
+                              DragLeave="GroupChildList_DragLeave"
+                              Drop="GroupChildList_Drop"
+                              DragItemsCompleted="GroupChildList_DragItemsCompleted" />
+                </StackPanel>
             </DataTemplate>
 
             <!-- Container style for launcher items (with hover effect) -->
             <Style x:Key="LauncherItemContainerStyle" TargetType="ListViewItem">
                 <Setter Property="IsTabStop" Value="False" />
+                <Setter Property="HorizontalAlignment" Value="Stretch" />
                 <Setter Property="MinHeight" Value="0" />
+                <Setter Property="MinWidth" Value="0" />
+                <Setter Property="Margin" Value="0" />
                 <Setter Property="Padding" Value="8,6" />
+                <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="ListViewItem">
+                            <Grid HorizontalAlignment="Stretch">
+                                <VisualStateManager.VisualStateGroups>
+                                    <VisualStateGroup x:Name="CommonStates">
+                                        <VisualState x:Name="Normal" />
+                                        <VisualState x:Name="PointerOver">
+                                            <Storyboard>
+                                                <ObjectAnimationUsingKeyFrames Storyboard.TargetName="BackgroundBorder" Storyboard.TargetProperty="Background">
+                                                    <DiscreteObjectKeyFrame KeyTime="0" Value="{ThemeResource SubtleFillColorSecondaryBrush}" />
+                                                </ObjectAnimationUsingKeyFrames>
+                                            </Storyboard>
+                                        </VisualState>
+                                        <VisualState x:Name="Pressed">
+                                            <Storyboard>
+                                                <ObjectAnimationUsingKeyFrames Storyboard.TargetName="BackgroundBorder" Storyboard.TargetProperty="Background">
+                                                    <DiscreteObjectKeyFrame KeyTime="0" Value="{ThemeResource SubtleFillColorTertiaryBrush}" />
+                                                </ObjectAnimationUsingKeyFrames>
+                                            </Storyboard>
+                                        </VisualState>
+                                        <VisualState x:Name="Disabled" />
+                                        <VisualState x:Name="Selected" />
+                                        <VisualState x:Name="PointerOverSelected">
+                                            <Storyboard>
+                                                <ObjectAnimationUsingKeyFrames Storyboard.TargetName="BackgroundBorder" Storyboard.TargetProperty="Background">
+                                                    <DiscreteObjectKeyFrame KeyTime="0" Value="{ThemeResource SubtleFillColorSecondaryBrush}" />
+                                                </ObjectAnimationUsingKeyFrames>
+                                            </Storyboard>
+                                        </VisualState>
+                                        <VisualState x:Name="PressedSelected">
+                                            <Storyboard>
+                                                <ObjectAnimationUsingKeyFrames Storyboard.TargetName="BackgroundBorder" Storyboard.TargetProperty="Background">
+                                                    <DiscreteObjectKeyFrame KeyTime="0" Value="{ThemeResource SubtleFillColorTertiaryBrush}" />
+                                                </ObjectAnimationUsingKeyFrames>
+                                            </Storyboard>
+                                        </VisualState>
+                                    </VisualStateGroup>
+                                </VisualStateManager.VisualStateGroups>
+                                <Border
+                                    x:Name="BackgroundBorder"
+                                    CornerRadius="6"
+                                    Background="Transparent"
+                                    HorizontalAlignment="Stretch"
+                                    BorderBrush="{TemplateBinding BorderBrush}"
+                                    BorderThickness="{TemplateBinding BorderThickness}"
+                                    Padding="{TemplateBinding Padding}">
+                                    <ContentPresenter
+                                        Content="{TemplateBinding Content}"
+                                        ContentTemplate="{TemplateBinding ContentTemplate}"
+                                        ContentTransitions="{TemplateBinding ContentTransitions}"
+                                        HorizontalAlignment="Stretch"
+                                        HorizontalContentAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                        VerticalContentAlignment="{TemplateBinding VerticalContentAlignment}" />
+                                </Border>
+                            </Grid>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+
+            <!-- Container style for group headers (non-interactive) -->
+            <Style x:Key="GroupItemContainerStyle" TargetType="ListViewItem">
+                <Setter Property="IsTabStop" Value="False" />
+                <Setter Property="HorizontalAlignment" Value="Stretch" />
+                <Setter Property="MinHeight" Value="0" />
+                <Setter Property="MinWidth" Value="0" />
+                <Setter Property="Margin" Value="0" />
+                <Setter Property="Padding" Value="0" />
+                <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="ListViewItem">
+                            <Border Padding="{TemplateBinding Padding}"
+                                    HorizontalAlignment="Stretch"
+                                    BorderBrush="{TemplateBinding BorderBrush}"
+                                    BorderThickness="{TemplateBinding BorderThickness}">
+                                <ContentPresenter
+                                    Content="{TemplateBinding Content}"
+                                    ContentTemplate="{TemplateBinding ContentTemplate}"
+                                    HorizontalAlignment="Stretch"
+                                    HorizontalContentAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                    VerticalContentAlignment="{TemplateBinding VerticalContentAlignment}" />
+                            </Border>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+
+            <local:FlyoutItemContainerStyleSelector
+                x:Key="ItemContainerStyleSelector"
+                GroupStyle="{StaticResource GroupItemContainerStyle}"
+                ItemStyle="{StaticResource LauncherItemContainerStyle}" />
+
+            <Style x:Key="IconItemContainerStyle" TargetType="ListViewItem">
+                <Setter Property="IsTabStop" Value="False" />
+                <Setter Property="Padding" Value="0" />
+                <Setter Property="Margin" Value="0" />
+                <Setter Property="MinWidth" Value="0" />
+                <Setter Property="MinHeight" Value="0" />
                 <Setter Property="HorizontalContentAlignment" Value="Stretch" />
                 <Setter Property="Template">
                     <Setter.Value>
@@ -81,15 +219,15 @@
                                         </VisualState>
                                     </VisualStateGroup>
                                 </VisualStateManager.VisualStateGroups>
-                                <Border
-                                    x:Name="BackgroundBorder"
+
+                                <Border x:Name="BackgroundBorder"
+                                        Background="Transparent"
                                     CornerRadius="6"
-                                    Background="Transparent"
-                                    Padding="{TemplateBinding Padding}">
+                                    BorderBrush="{TemplateBinding BorderBrush}"
+                                    BorderThickness="{TemplateBinding BorderThickness}">
                                     <ContentPresenter
                                         Content="{TemplateBinding Content}"
                                         ContentTemplate="{TemplateBinding ContentTemplate}"
-                                        ContentTransitions="{TemplateBinding ContentTransitions}"
                                         HorizontalContentAlignment="{TemplateBinding HorizontalContentAlignment}"
                                         VerticalContentAlignment="{TemplateBinding VerticalContentAlignment}" />
                                 </Border>
@@ -98,33 +236,6 @@
                     </Setter.Value>
                 </Setter>
             </Style>
-
-            <!-- Container style for group headers (non-interactive) -->
-            <Style x:Key="GroupItemContainerStyle" TargetType="ListViewItem">
-                <Setter Property="IsTabStop" Value="False" />
-                <Setter Property="IsHitTestVisible" Value="False" />
-                <Setter Property="MinHeight" Value="0" />
-                <Setter Property="Padding" Value="8,8,8,2" />
-                <Setter Property="HorizontalContentAlignment" Value="Stretch" />
-                <Setter Property="Template">
-                    <Setter.Value>
-                        <ControlTemplate TargetType="ListViewItem">
-                            <Border Padding="{TemplateBinding Padding}">
-                                <ContentPresenter
-                                    Content="{TemplateBinding Content}"
-                                    ContentTemplate="{TemplateBinding ContentTemplate}"
-                                    HorizontalContentAlignment="{TemplateBinding HorizontalContentAlignment}"
-                                    VerticalContentAlignment="{TemplateBinding VerticalContentAlignment}" />
-                            </Border>
-                        </ControlTemplate>
-                    </Setter.Value>
-                </Setter>
-            </Style>
-
-            <local:FlyoutItemContainerStyleSelector
-                x:Key="ItemContainerStyleSelector"
-                GroupStyle="{StaticResource GroupItemContainerStyle}"
-                ItemStyle="{StaticResource LauncherItemContainerStyle}" />
 
             <!-- Launcher item row -->
             <DataTemplate x:Key="LauncherItemTemplate">
@@ -170,6 +281,126 @@
                         TextWrapping="NoWrap"
                         TextTrimming="CharacterEllipsis" />
                 </Grid>
+            </DataTemplate>
+
+            <DataTemplate x:Key="IconItemTemplate">
+                <Grid Width="80" Height="84">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="32" />
+                    </Grid.RowDefinitions>
+
+                    <Grid Grid.Row="0"
+                          HorizontalAlignment="Center"
+                          VerticalAlignment="Center">
+                        <Image Source="{Binding IconPath, Converter={StaticResource IconPathToImage}}"
+                               Visibility="{Binding IconPath, Converter={StaticResource IconPathToVisibility}}"
+                               Width="32"
+                               Height="32" />
+
+                        <Grid Visibility="{Binding IconPath, Converter={StaticResource IconPathToVisibility}, ConverterParameter=invert}">
+                            <FontIcon Glyph="{Binding IconGlyph}"
+                                      Visibility="{Binding IconGlyph, Converter={StaticResource IsFluentGlyph}}"
+                                      Foreground="{Binding IconColor, Converter={StaticResource IconColorToBrush}}"
+                                      FontSize="28" />
+
+                            <TextBlock Text="{Binding IconGlyph}"
+                                       Visibility="{Binding IconGlyph, Converter={StaticResource IsFluentGlyph}, ConverterParameter=invert}"
+                                       Foreground="{Binding IconColor, Converter={StaticResource IconColorToBrush}}"
+                                       FontSize="28"
+                                       HorizontalAlignment="Center"
+                                       VerticalAlignment="Center" />
+                        </Grid>
+                    </Grid>
+
+                    <TextBlock Grid.Row="1"
+                               Text="{Binding Name}"
+                               FontSize="11"
+                               TextAlignment="Center"
+                               TextWrapping="Wrap"
+                               TextTrimming="CharacterEllipsis"
+                               MaxLines="2"
+                               VerticalAlignment="Top"
+                               HorizontalAlignment="Center"
+                               MaxWidth="72"
+                               Margin="0,2,0,0" />
+                </Grid>
+            </DataTemplate>
+
+            <DataTemplate x:Key="IconGroupTemplate">
+                <StackPanel Margin="0,6,0,0">
+                    <Grid Margin="8,0,8,4"
+                          HorizontalAlignment="Stretch"
+                          ColumnSpacing="8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+
+                        <TextBlock Grid.Column="0"
+                                   Text="{Binding Name}"
+                                   FontSize="12"
+                                   FontWeight="SemiBold"
+                                   Opacity="0.7"
+                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                   VerticalAlignment="Center"
+                                   TextWrapping="NoWrap"
+                                   TextTrimming="CharacterEllipsis" />
+                    </Grid>
+
+                    <ListView ItemsSource="{Binding Children}"
+                              Tag="{Binding}"
+                              CanDragItems="True"
+                              AllowDrop="True"
+                              IsItemClickEnabled="True"
+                              SelectionMode="None"
+                              MinHeight="0"
+                              Loaded="IconGroupChildList_Loaded"
+                              ScrollViewer.VerticalScrollBarVisibility="Disabled"
+                              ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                              ItemTemplate="{StaticResource IconItemTemplate}"
+                              ItemContainerStyle="{StaticResource IconItemContainerStyle}"
+                              ItemClick="ItemsListControl_ItemClick"
+                              RightTapped="ItemsListControl_RightTapped"
+                              DragItemsStarting="GroupChildList_DragItemsStarting"
+                              DragOver="GroupChildList_DragOver"
+                              DragLeave="GroupChildList_DragLeave"
+                              Drop="GroupChildList_Drop"
+                              DragItemsCompleted="GroupChildList_DragItemsCompleted">
+                        <ListView.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <ItemsWrapGrid Orientation="Horizontal" MaximumRowsOrColumns="3" />
+                            </ItemsPanelTemplate>
+                        </ListView.ItemsPanel>
+                    </ListView>
+                </StackPanel>
+            </DataTemplate>
+
+            <DataTemplate x:Key="IconSyntheticGroupTemplate">
+                <ListView ItemsSource="{Binding Children}"
+                          Tag="{Binding}"
+                          CanDragItems="True"
+                          AllowDrop="True"
+                          IsItemClickEnabled="True"
+                          SelectionMode="None"
+                          MinHeight="0"
+                          Loaded="IconGroupChildList_Loaded"
+                          ScrollViewer.VerticalScrollBarVisibility="Disabled"
+                          ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                          ItemTemplate="{StaticResource IconItemTemplate}"
+                          ItemContainerStyle="{StaticResource IconItemContainerStyle}"
+                          ItemClick="ItemsListControl_ItemClick"
+                          RightTapped="ItemsListControl_RightTapped"
+                          DragItemsStarting="GroupChildList_DragItemsStarting"
+                          DragOver="GroupChildList_DragOver"
+                          DragLeave="GroupChildList_DragLeave"
+                          Drop="GroupChildList_Drop"
+                          DragItemsCompleted="GroupChildList_DragItemsCompleted">
+                    <ListView.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <ItemsWrapGrid Orientation="Horizontal" MaximumRowsOrColumns="3" />
+                        </ItemsPanelTemplate>
+                    </ListView.ItemsPanel>
+                </ListView>
             </DataTemplate>
         </Grid.Resources>
 

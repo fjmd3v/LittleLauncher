@@ -54,7 +54,7 @@ applyTo: "{**/ViewModels/UserSettings*.cs,**/Models/Launcher.cs}"
 - `CustomTrayIconPath` (`[ObservableProperty]`)
 - `NIconHide` (`[ObservableProperty]`)
 - `ViewMode` (`[ObservableProperty]`)
-- `IconModeIconsPerRow` (`[ObservableProperty]`, default 3, clamped to 1–6, controls icon density in icon-mode flyouts and the launcher item editor)
+- `IconModeIconsPerRow` (`[ObservableProperty]`, default 3, clamped to 1–12, controls icon density in icon-mode flyouts and the launcher item editor)
 - `ShowTitle` (`[ObservableProperty]`, shows launcher name at top of flyout)
 - `Items: ObservableCollection<LauncherItem>`
 

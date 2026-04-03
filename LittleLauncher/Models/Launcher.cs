@@ -97,7 +97,7 @@ public partial class Launcher : ObservableObject
 {
     public const int MinIconModeIconsPerRow = 1;
     public const int DefaultIconModeIconsPerRow = 3;
-    public const int MaxIconModeIconsPerRow = 6;
+    public const int MaxIconModeIconsPerRow = 12;
 
     public static int ClampIconModeIconsPerRow(int value) => Math.Clamp(value, MinIconModeIconsPerRow, MaxIconModeIconsPerRow);
 
@@ -137,7 +137,7 @@ public partial class Launcher : ObservableObject
 
     /// <summary>
     /// Number of icons shown across each icon-mode column.
-    /// Defaults to 3 and is clamped to a sensible 1-6 range.
+    /// Defaults to 3 and is clamped to a sensible 1-12 range.
     /// </summary>
     [ObservableProperty]
     public partial int IconModeIconsPerRow { get; set; } = DefaultIconModeIconsPerRow;
