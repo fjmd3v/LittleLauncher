@@ -33,9 +33,9 @@
                 ItemTemplate="{StaticResource SmallIconItemTemplate}" />
 
             <DataTemplate x:Key="ListGroupTemplate">
-                <StackPanel Margin="0,6,0,0"
+                <StackPanel Margin="0"
                             HorizontalAlignment="Stretch">
-                    <Grid Margin="8,0,8,2"
+                    <Grid Margin="8,4,8,4"
                           HorizontalAlignment="Stretch"
                                                     ColumnSpacing="8">
                         <Grid.ColumnDefinitions>
@@ -360,8 +360,8 @@
             </DataTemplate>
 
             <DataTemplate x:Key="IconGroupTemplate">
-                <StackPanel Margin="0,6,0,0">
-                    <Grid Margin="8,0,8,4"
+                <StackPanel Margin="0">
+                    <Grid Margin="8,4,8,4"
                           HorizontalAlignment="Stretch"
                           ColumnSpacing="8">
                         <Grid.ColumnDefinitions>
@@ -374,6 +374,8 @@
                                    FontWeight="SemiBold"
                                    Opacity="0.7"
                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                 HorizontalAlignment="Center"
+                                 TextAlignment="Center"
                                    VerticalAlignment="Center"
                                    TextWrapping="NoWrap"
                                    TextTrimming="CharacterEllipsis" />
@@ -381,6 +383,7 @@
 
                     <ListView ItemsSource="{Binding Children}"
                               Tag="{Binding}"
+                              HorizontalAlignment="Center"
                               CanDragItems="True"
                               AllowDrop="True"
                               IsItemClickEnabled="True"
@@ -436,9 +439,30 @@
             </DataTemplate>
 
             <DataTemplate x:Key="SmallIconGroupTemplate">
-                <StackPanel Margin="0,6,0,0">
+                <StackPanel Margin="0">
+                    <Grid Margin="8,4,8,4"
+                          HorizontalAlignment="Stretch"
+                          ColumnSpacing="8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+
+                        <TextBlock Grid.Column="0"
+                                   Text="{Binding Name}"
+                                   FontSize="12"
+                                   FontWeight="SemiBold"
+                                   Opacity="0.7"
+                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                   HorizontalAlignment="Center"
+                                   TextAlignment="Center"
+                                   VerticalAlignment="Center"
+                                   TextWrapping="NoWrap"
+                                   TextTrimming="CharacterEllipsis" />
+                    </Grid>
+
                     <ListView ItemsSource="{Binding Children}"
                               Tag="{Binding}"
+                              HorizontalAlignment="Center"
                               CanDragItems="True"
                               AllowDrop="True"
                               IsItemClickEnabled="True"
@@ -514,7 +538,7 @@
             </MenuFlyout>
         </Grid.ContextFlyout>
 
-        <StackPanel VerticalAlignment="Center">
+        <StackPanel x:Name="ContentStack" VerticalAlignment="Top" Margin="8">
             <TextBlock x:Name="LauncherTitle"
                        FontSize="12"
                        FontWeight="SemiBold"
@@ -524,7 +548,7 @@
                        TextTrimming="CharacterEllipsis"
                        TextAlignment="Center"
                        HorizontalAlignment="Stretch"
-                       Margin="16,8,16,0"
+                       Margin="8,4,8,8"
                        Visibility="Collapsed" />
             <StackPanel x:Name="ColumnsPanel" Orientation="Horizontal" />
         </StackPanel>

@@ -40,7 +40,9 @@ public partial class FlyoutWindow : Window
     private const int SmallIconSize = 20;
     private const int SmallIconColumnChromeWidth = DefaultSmallIconColumnWidth - (SmallIconCellWidth * Launcher.DefaultIconModeIconsPerRow);
     private const int IconGroupHeaderHeight = 30;
-    private const int SmallIconGroupSpacing = 6;
+    private const int SmallIconGroupHeaderHeight = 30;
+    private const int FlyoutOuterPadding = 8;
+    private const int LauncherTitleHeight = 32;
     private const double DefaultMinFlyoutHeight = 80;
     private const double SmallIconMinFlyoutHeight = 52;
     private const int ResizeGripWidth = 4;
@@ -545,7 +547,7 @@ public partial class FlyoutWindow : Window
         var lv = new ListView
         {
             Width = isIconMode ? GetIconColumnWidth(_columnLists[columnIndex]) : ColumnWidth,
-            Padding = isIconMode ? new Thickness(0) : new Thickness(8, 6, 8, 6),
+            Padding = new Thickness(0),
             IsItemClickEnabled = true,
             SelectionMode = ListViewSelectionMode.None,
             IsTabStop = false,
@@ -630,7 +632,7 @@ public partial class FlyoutWindow : Window
 
     private int GetActiveIconColumnChromeWidth() => IsSmallIconMode ? SmallIconColumnChromeWidth : IconColumnChromeWidth;
 
-    private int GetActiveGroupHeaderHeight() => IsSmallIconMode ? SmallIconGroupSpacing : IconGroupHeaderHeight;
+    private int GetActiveGroupHeaderHeight() => IsSmallIconMode ? SmallIconGroupHeaderHeight : IconGroupHeaderHeight;
 
     private double GetMinimumFlyoutHeight() => IsSmallIconMode ? SmallIconMinFlyoutHeight : DefaultMinFlyoutHeight;
 
@@ -638,47 +640,23 @@ public partial class FlyoutWindow : Window
 
     private int GetIconColumnWidth(ObservableCollection<LauncherItem> items)
     {
-        int maxIconsPerRow = GetIconModeIconsPerRow();
-        int cellWidth = GetActiveIconCellWidth();
-        int widestRow = 0;
-        int currentRow = 0;
-
-        foreach (var item in items)
-        {
-            if (item.IsGroup)
-            {
-                widestRow = Math.Max(widestRow, currentRow);
-                currentRow = 0;
-
-                if (item.Children.Count > 0)
-                    widestRow = Math.Max(widestRow, Math.Min(maxIconsPerRow, item.Children.Count));
-
-                continue;
-            }
-
-            currentRow++;
-            if (currentRow >= maxIconsPerRow)
-            {
-                widestRow = Math.Max(widestRow, maxIconsPerRow);
-                currentRow = 0;
-            }
-        }
-
-        widestRow = Math.Max(widestRow, currentRow);
-        widestRow = Math.Max(1, widestRow);
-        return GetActiveIconColumnChromeWidth() + (widestRow * cellWidth);
+        return GetIconColumnWidth();
     }
 
     private int GetFlyoutWidth()
     {
+        int contentWidth;
+
         if (IsListMode)
-            return ColumnWidth * Math.Max(1, ColumnsPanel.Children.Count);
+            contentWidth = ColumnWidth * Math.Max(1, ColumnsPanel.Children.Count);
+        else
+        {
+            contentWidth = 0;
+            foreach (var column in _columnLists)
+                contentWidth += GetIconColumnWidth(column);
+        }
 
-        int totalWidth = 0;
-        foreach (var column in _columnLists)
-            totalWidth += GetIconColumnWidth(column);
-
-        return totalWidth;
+        return contentWidth + (FlyoutOuterPadding * 2);
     }
 
     private int GetIconResizeStepWidth()
@@ -698,7 +676,7 @@ public partial class FlyoutWindow : Window
     private ScrollViewer CreateIconModeColumn(ObservableCollection<LauncherItem> items)
     {
         int iconsPerRow = GetIconModeIconsPerRow();
-        var column = new StackPanel { Width = GetIconColumnWidth(items), Padding = new Thickness(8, 6, 8, 6) };
+        var column = new StackPanel { Width = GetIconColumnWidth(items), Padding = new Thickness(8, 2, 8, 2) };
         var currentRow = new StackPanel { Orientation = Orientation.Horizontal };
         int itemsInRow = 0;
 
@@ -733,7 +711,7 @@ public partial class FlyoutWindow : Window
                     Opacity = 0.7,
                     TextAlignment = TextAlignment.Center,
                     HorizontalAlignment = HorizontalAlignment.Stretch,
-                    Margin = new Thickness(0, 8, 0, 4),
+                    Margin = new Thickness(0, 4, 0, 4),
                 });
             }
             else
@@ -876,10 +854,22 @@ public partial class FlyoutWindow : Window
         {
             LauncherTitle.Text = _launcher.Name;
             LauncherTitle.Visibility = Visibility.Visible;
+            ContentStack.VerticalAlignment = VerticalAlignment.Top;
+            ColumnsPanel.Margin = new Thickness(0);
         }
         else
         {
             LauncherTitle.Visibility = Visibility.Collapsed;
+            if (IsIconMode)
+            {
+                ContentStack.VerticalAlignment = VerticalAlignment.Center;
+                ColumnsPanel.Margin = new Thickness(0);
+            }
+            else
+            {
+                ContentStack.VerticalAlignment = VerticalAlignment.Top;
+                ColumnsPanel.Margin = new Thickness(0, 0, 0, 4);
+            }
         }
 
         for (int columnIndex = 0; columnIndex < _columnLists.Count; columnIndex++)
@@ -1110,8 +1100,7 @@ public partial class FlyoutWindow : Window
 
             if (childListView.Tag is LauncherItem group)
             {
-                int widestRowIcons = Math.Max(1, Math.Min(GetIconModeIconsPerRow(), group.Children.Count));
-                childListView.Width = widestRowIcons * GetActiveIconCellWidth();
+                childListView.Width = GetIconModeIconsPerRow() * GetActiveIconCellWidth();
                 childListView.HorizontalAlignment = HorizontalAlignment.Center;
             }
         }
@@ -1168,8 +1157,7 @@ public partial class FlyoutWindow : Window
 
         if (listView.Tag is LauncherItem group)
         {
-            int widestRowIcons = Math.Max(1, Math.Min(GetIconModeIconsPerRow(), group.Children.Count));
-            listView.Width = widestRowIcons * GetActiveIconCellWidth();
+            listView.Width = GetIconModeIconsPerRow() * GetActiveIconCellWidth();
             listView.HorizontalAlignment = HorizontalAlignment.Center;
         }
     }
@@ -2006,56 +1994,48 @@ public partial class FlyoutWindow : Window
         // ExecutionEngineException in Microsoft.WinUI.dll.
         //
         // Each ListViewItem container: MinHeight=0, Padding="8,6" → 12px vertical padding.
-        // Regular item content: Icon 20px tall → total ~32px
-        // Group header content: NavigationViewItemHeader ~40px
-        // Heading content:      FontSize=11 (~15px) + Margin top 4 → total ~31px
-        const double itemHeight = 32;
-        const double groupHeight = 40;
-        const double listPadding = 12;     // ListView Padding="8,6,8,6" → 6+6
-
+        // Regular item content: Icon 20px tall → total ~32px.
+        // Group header content: 12px label with 4px top/bottom margin → ~24px.
         var items = _launcher.Items;
         if (items == null) return _lastMeasuredHeight;
 
+        const double itemHeight = 32;
+        const double groupHeight = 24;
+
         // Compute the height of each column and take the tallest.
         double maxColumnHeight = 0;
-        double currentColumnHeight = listPadding;
-
-        foreach (var item in items)
+        foreach (var column in BuildColumnLists())
         {
-            if (item.IsColumnBreak)
-            {
-                maxColumnHeight = Math.Max(maxColumnHeight, currentColumnHeight);
-                currentColumnHeight = listPadding;
-                continue;
-            }
+            double currentColumnHeight = 0;
 
-            if (item.IsGroup)
-                currentColumnHeight += groupHeight;
-            else
-                currentColumnHeight += itemHeight;
-
-            if (item.IsGroup)
+            foreach (var item in column)
             {
-                foreach (var child in item.Children)
+                if (item.IsGroup)
+                {
+                    currentColumnHeight += groupHeight;
+                    foreach (var child in item.Children)
+                        currentColumnHeight += itemHeight;
+                }
+                else
                 {
                     currentColumnHeight += itemHeight;
                 }
             }
-        }
 
-        maxColumnHeight = Math.Max(maxColumnHeight, currentColumnHeight);
+            maxColumnHeight = Math.Max(maxColumnHeight, currentColumnHeight);
+        }
 
         // Add a small buffer to cover accumulated sub-pixel font-height rounding.
         // Clamp to the available work-area height so the flyout never exceeds the screen.
-        double titleHeight = _launcher.ShowTitle ? 24 : 0;
+        double titleHeight = _launcher.ShowTitle ? LauncherTitleHeight : 0;
+        double outerPadding = FlyoutOuterPadding * 2;
         double maxContentHeight = GetWorkAreaHeightDips() - 16; // 16 = gap from taskbar edges
-        _lastMeasuredHeight = Math.Clamp(maxColumnHeight + titleHeight + 2, GetMinimumFlyoutHeight(), maxContentHeight);
+        _lastMeasuredHeight = Math.Clamp(maxColumnHeight + titleHeight + outerPadding + 2, GetMinimumFlyoutHeight(), maxContentHeight);
         return _lastMeasuredHeight;
     }
 
     private double MeasureIconModeHeight()
     {
-        const double listPadding = 12;
         int iconsPerRow = GetIconModeIconsPerRow();
         int cellHeight = GetActiveIconCellHeight();
         double groupHeight = GetActiveGroupHeaderHeight();
@@ -2064,7 +2044,7 @@ public partial class FlyoutWindow : Window
         if (items == null) return _lastMeasuredHeight;
 
         double maxColumnHeight = 0;
-        double currentColumnHeight = listPadding;
+        double currentColumnHeight = 0;
         int pendingIcons = 0;
 
         foreach (var item in items)
@@ -2078,7 +2058,7 @@ public partial class FlyoutWindow : Window
                     pendingIcons = 0;
                 }
                 maxColumnHeight = Math.Max(maxColumnHeight, currentColumnHeight);
-                currentColumnHeight = listPadding;
+                currentColumnHeight = 0;
                 continue;
             }
 
@@ -2107,9 +2087,10 @@ public partial class FlyoutWindow : Window
         }
 
         maxColumnHeight = Math.Max(maxColumnHeight, currentColumnHeight);
-        double titleHeight = _launcher.ShowTitle ? 24 : 0;
+        double titleHeight = _launcher.ShowTitle ? LauncherTitleHeight : 0;
+        double outerPadding = FlyoutOuterPadding * 2;
         double maxContentHeight = GetWorkAreaHeightDips() - 16;
-        _lastMeasuredHeight = Math.Clamp(maxColumnHeight + titleHeight + 2, GetMinimumFlyoutHeight(), maxContentHeight);
+        _lastMeasuredHeight = Math.Clamp(maxColumnHeight + titleHeight + outerPadding + 2, GetMinimumFlyoutHeight(), maxContentHeight);
         return _lastMeasuredHeight;
     }
 

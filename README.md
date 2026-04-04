@@ -55,6 +55,7 @@ Little Launcher lives in the Windows system tray and/or taskbar. Clicking its ic
 
 - **Multiple launchers** — define multiple named launchers, each with its own icon and items.
 - **Application & website shortcuts** — launch any executable or URL with one click from the flyout.
+- **Manual icon picker** — choose item icons from Fluent glyphs, emojis, bundled app icons, uploaded images, or the selfh.st icon catalog.
 - **View modes** — choose between list view, icon grid view, or a compact tray-sized small-icon grid with no labels.
 - **Groups & columns** — organise items into groups and multi-column layouts.
 - **Direct flyout reordering** — drag items in the live flyout to reorder them, with the same insertion-indicator style used in the editor.

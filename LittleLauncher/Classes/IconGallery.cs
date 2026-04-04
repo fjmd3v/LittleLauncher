@@ -6,12 +6,16 @@ using Microsoft.UI.Xaml.Media.Imaging;
 using Microsoft.UI.Text;
 using LittleLauncher.Models;
 using System.IO;
+using System.Net.Http;
+using System.Text.Json;
+using System.Text.Json.Serialization;
+using System.Threading;
 
 namespace LittleLauncher.Classes;
 
 /// <summary>
 /// Provides a gallery-style icon chooser Flyout with tabs for Segoe Fluent Icons,
-/// emojis, app color icons, and custom file browse.
+/// emojis, app color icons, selfh.st icons, and custom file browse.
 /// </summary>
 internal static class IconGallery
 {
@@ -26,10 +30,29 @@ internal static class IconGallery
     private const int TabGlyphs = 0;
     private const int TabEmoji = 1;
     private const int TabAppIcons = 2;
+    private const int TabSelfhSt = 3;
 
     // ── Layout constants ─────────────────────────────────────
     private const double IconButtonSize = 40;
     private const int IconsPerRow = 9;
+    private const int SelfhStIconsPerRow = 4;
+    private const int MaxVisibleSelfhStIcons = 120;
+
+    private static readonly HttpClient SelfhStHttp = new() { Timeout = TimeSpan.FromSeconds(10) };
+    private static readonly SemaphoreSlim SelfhStCatalogLock = new(1, 1);
+    private static readonly JsonSerializerOptions SelfhStJsonOptions = new()
+    {
+        PropertyNameCaseInsensitive = true
+    };
+
+    private static IReadOnlyList<SelfhStIconEntry>? _selfhStCatalog;
+    private static DateTimeOffset _selfhStCatalogFetchedAt;
+
+    private const string SelfhStIndexUrl = "https://raw.githubusercontent.com/selfhst/icons/refs/heads/main/index.json";
+    private const string SelfhStPngUrlPrefix = "https://cdn.jsdelivr.net/gh/selfhst/icons@main/png/";
+    private static readonly Uri SelfhStIconsUri = new("https://selfh.st/icons/");
+    private static readonly Uri SelfhStLicenseUri = new("https://github.com/selfhst/icons/blob/main/LICENSE");
+    private static readonly TimeSpan SelfhStCatalogTtl = TimeSpan.FromHours(6);
 
     /// <summary>
     /// Creates a Flyout containing the icon gallery. Attach it to a Button.
@@ -48,7 +71,10 @@ internal static class IconGallery
         string? currentColor = null,
         string? currentImagePath = null)
     {
-        var flyout = new Flyout();
+        var flyout = new Flyout
+        {
+            Placement = FlyoutPlacementMode.Bottom
+        };
 
         // ── Flyout presenter sizing ──
         var presenterStyle = new Style(typeof(FlyoutPresenter));
@@ -65,9 +91,17 @@ internal static class IconGallery
         // ── State ──
         int activeTab = TabGlyphs;
         IconResult? pendingSelection = null;
+        int selfhStRequestVersion = 0;
 
         // ── Root layout ──
-        var root = new StackPanel { Width = 396 };
+        var root = new Grid { Width = 396 };
+        root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
         // ── Search box ──
         var searchBox = new AutoSuggestBox
@@ -76,6 +110,7 @@ internal static class IconGallery
             QueryIcon = new SymbolIcon(Symbol.Find),
             Margin = new Thickness(0, 0, 0, 8)
         };
+        Grid.SetRow(searchBox, 0);
         root.Children.Add(searchBox);
 
         // ── Tab bar ──
@@ -85,7 +120,9 @@ internal static class IconGallery
         {
             VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
             HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
-            Height = 320
+            MinHeight = 140,
+            MaxHeight = 320,
+            VerticalAlignment = VerticalAlignment.Stretch
         };
         var contentPanel = new StackPanel();
         contentScroller.Content = contentPanel;
@@ -93,6 +130,7 @@ internal static class IconGallery
         // Color getter — assigned after BuildColorPalette below
         Func<string> getSelectedColor = () => "";
         StackPanel colorPalette = null!;
+        FrameworkElement selfhStAttribution = CreateSelfhStAttributionBar();
 
         // ── Confirm / Cancel bar ──
         var confirmBar = new StackPanel
@@ -146,6 +184,22 @@ internal static class IconGallery
             confirmBtn.IsEnabled = true;
         }
 
+        void UpdateFlyoutHeights()
+        {
+            double availableHeight = root.XamlRoot?.Size.Height ?? 720;
+            double maxRootHeight = Math.Max(340, Math.Min(560, availableHeight - 24));
+            root.MaxHeight = maxRootHeight;
+
+            double reservedHeight = 164;
+            if (colorPalette.Visibility == Visibility.Visible)
+                reservedHeight += 64;
+            if (selfhStAttribution.Visibility == Visibility.Visible)
+                reservedHeight += 32;
+
+            double contentHeight = Math.Max(140, Math.Min(320, maxRootHeight - reservedHeight));
+            contentScroller.Height = contentHeight;
+        }
+
         void SelectTab(int tabIndex, string? searchQuery = null, string? currentGlyphToSelect = null, string? currentImageToSelect = null)
         {
             activeTab = tabIndex;
@@ -166,6 +220,9 @@ internal static class IconGallery
             // Color palette only applies to glyph/emoji tabs
             colorPalette.Visibility = tabIndex is TabGlyphs or TabEmoji
                 ? Visibility.Visible : Visibility.Collapsed;
+            selfhStAttribution.Visibility = tabIndex == TabSelfhSt
+                ? Visibility.Visible : Visibility.Collapsed;
+            UpdateFlyoutHeights();
 
             switch (tabIndex)
             {
@@ -186,6 +243,17 @@ internal static class IconGallery
                     {
                         SetPending(new IconResult(null, path));
                     }, HighlightIconButton, currentImageToSelect);
+                    break;
+                case TabSelfhSt:
+                    int requestVersion = ++selfhStRequestVersion;
+                    BuildSelfhStLoadingContent(contentPanel);
+                    _ = LoadSelfhStContentAsync(
+                        contentPanel,
+                        query,
+                        path => SetPending(new IconResult(null, path)),
+                        HighlightIconButton,
+                        currentImageToSelect,
+                        () => requestVersion == selfhStRequestVersion && activeTab == TabSelfhSt);
                     break;
             }
         }
@@ -208,6 +276,12 @@ internal static class IconGallery
         tabButtons.Add(appBtn);
         tabBar.Children.Add(appBtn);
 
+        var selfhStBtn = MakeTabButton(new TextBlock { Text = "sh", FontSize = 13, FontWeight = FontWeights.Bold }, "selfh.st Icons");
+        selfhStBtn.Click += (s, e) => { searchBox.Text = ""; SelectTab(TabSelfhSt); };
+        tabButtons.Add(selfhStBtn);
+        tabBar.Children.Add(selfhStBtn);
+
+        Grid.SetRow(tabBar, 1);
         root.Children.Add(tabBar);
 
         // ── Color palette ──
@@ -215,8 +289,10 @@ internal static class IconGallery
             onColorChanged: () => SelectTab(activeTab, searchBox.Text));
         colorPalette = palette;
         getSelectedColor = colorGetter;
+        Grid.SetRow(colorPalette, 2);
         root.Children.Add(colorPalette);
 
+        Grid.SetRow(contentScroller, 3);
         root.Children.Add(contentScroller);
 
         // ── Bottom buttons ──
@@ -249,7 +325,11 @@ internal static class IconGallery
             onReset();
         };
         bottomBar.Children.Add(resetBtn);
+        Grid.SetRow(bottomBar, 4);
         root.Children.Add(bottomBar);
+        Grid.SetRow(selfhStAttribution, 5);
+        root.Children.Add(selfhStAttribution);
+        Grid.SetRow(confirmBar, 6);
         root.Children.Add(confirmBar);
 
         // ── Search handler ──
@@ -265,6 +345,7 @@ internal static class IconGallery
         {
             pendingSelection = null;
             confirmBtn.IsEnabled = false;
+            UpdateFlyoutHeights();
 
             // Determine which tab to open based on current icon
             if (!string.IsNullOrEmpty(currentImagePath))
@@ -273,6 +354,8 @@ internal static class IconGallery
                 string fileName = Path.GetFileName(currentImagePath);
                 if (fileName.StartsWith("app-", StringComparison.OrdinalIgnoreCase))
                     SelectTab(TabAppIcons, null, currentImageToSelect: currentImagePath);
+                else if (IsSelfhStImagePath(currentImagePath))
+                    SelectTab(TabSelfhSt, null, currentImageToSelect: currentImagePath);
                 else
                     SelectTab(TabGlyphs); // custom file — no tab to pre-select in
             }
@@ -296,7 +379,10 @@ internal static class IconGallery
         Action<IconResult> onSelected,
         Action onBrowseRequested)
     {
-        var flyout = new Flyout();
+        var flyout = new Flyout
+        {
+            Placement = FlyoutPlacementMode.Bottom
+        };
 
         var presenterStyle = new Style(typeof(FlyoutPresenter));
         presenterStyle.Setters.Add(new Setter(FrameworkElement.MaxWidthProperty, 480.0));
@@ -312,10 +398,18 @@ internal static class IconGallery
         const int TabPresets = 0;
         const int TabGlyphsL = 1;
         const int TabEmojiL = 2;
+        const int TabSelfhStL = 3;
 
         int activeTab = TabPresets;
         IconResult? pendingSelectionL = null;
-        var root = new StackPanel { Width = 396 };
+        int selfhStRequestVersionL = 0;
+        var root = new Grid { Width = 396 };
+        root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
         var searchBox = new AutoSuggestBox
         {
@@ -323,6 +417,7 @@ internal static class IconGallery
             QueryIcon = new SymbolIcon(Symbol.Find),
             Margin = new Thickness(0, 0, 0, 8)
         };
+        Grid.SetRow(searchBox, 0);
         root.Children.Add(searchBox);
 
         var tabBar = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 2, Margin = new Thickness(0, 0, 0, 8) };
@@ -331,7 +426,9 @@ internal static class IconGallery
         {
             VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
             HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
-            Height = 320
+            MinHeight = 140,
+            MaxHeight = 320,
+            VerticalAlignment = VerticalAlignment.Stretch
         };
         var contentPanel = new StackPanel();
         contentScroller.Content = contentPanel;
@@ -339,6 +436,7 @@ internal static class IconGallery
         // Color getter — assigned after BuildColorPalette below
         Func<string> getSelectedColorL = () => "";
         StackPanel colorPaletteL = null!;
+        FrameworkElement selfhStAttributionL = CreateSelfhStAttributionBar();
 
         // ── Confirm / Cancel bar ──
         var confirmBarL = new StackPanel
@@ -391,6 +489,22 @@ internal static class IconGallery
             confirmBtnL.IsEnabled = true;
         }
 
+        void UpdateFlyoutHeightsL()
+        {
+            double availableHeight = root.XamlRoot?.Size.Height ?? 720;
+            double maxRootHeight = Math.Max(320, Math.Min(540, availableHeight - 24));
+            root.MaxHeight = maxRootHeight;
+
+            double reservedHeight = 128;
+            if (colorPaletteL.Visibility == Visibility.Visible)
+                reservedHeight += 64;
+            if (selfhStAttributionL.Visibility == Visibility.Visible)
+                reservedHeight += 32;
+
+            double contentHeight = Math.Max(140, Math.Min(320, maxRootHeight - reservedHeight));
+            contentScroller.Height = contentHeight;
+        }
+
         void SelectTab(int tabIndex, string? searchQuery = null, string? currentGlyphToSelect = null, string? currentPresetToSelect = null)
         {
             activeTab = tabIndex;
@@ -411,6 +525,9 @@ internal static class IconGallery
             // Color palette only applies to glyph/emoji tabs
             colorPaletteL.Visibility = tabIndex is TabGlyphsL or TabEmojiL
                 ? Visibility.Visible : Visibility.Collapsed;
+            selfhStAttributionL.Visibility = tabIndex == TabSelfhStL
+                ? Visibility.Visible : Visibility.Collapsed;
+            UpdateFlyoutHeightsL();
 
             switch (tabIndex)
             {
@@ -436,6 +553,17 @@ internal static class IconGallery
                         SetPendingL(new IconResult(emoji, null, Color: getSelectedColorL()));
                     }, getSelectedColorL(), HighlightIconButtonL, currentGlyphToSelect);
                     break;
+                case TabSelfhStL:
+                    int requestVersion = ++selfhStRequestVersionL;
+                    BuildSelfhStLoadingContent(contentPanel);
+                    _ = LoadSelfhStContentAsync(
+                        contentPanel,
+                        query,
+                        path => SetPendingL(new IconResult(null, path)),
+                        HighlightIconButtonL,
+                        null,
+                        () => requestVersion == selfhStRequestVersionL && activeTab == TabSelfhStL);
+                    break;
             }
         }
 
@@ -457,6 +585,12 @@ internal static class IconGallery
         tabButtons.Add(emojiBtn);
         tabBar.Children.Add(emojiBtn);
 
+        var selfhStBtn = MakeTabButton(new TextBlock { Text = "sh", FontSize = 13, FontWeight = FontWeights.Bold }, "selfh.st Icons");
+        selfhStBtn.Click += (s, e) => { searchBox.Text = ""; SelectTab(TabSelfhStL); };
+        tabButtons.Add(selfhStBtn);
+        tabBar.Children.Add(selfhStBtn);
+
+        Grid.SetRow(tabBar, 1);
         root.Children.Add(tabBar);
 
         // ── Color palette ──
@@ -465,9 +599,14 @@ internal static class IconGallery
             onColorChanged: () => SelectTab(activeTab, searchBox.Text));
         colorPaletteL = paletteL;
         getSelectedColorL = colorGetterL;
+        Grid.SetRow(colorPaletteL, 2);
         root.Children.Add(colorPaletteL);
 
+        Grid.SetRow(contentScroller, 3);
         root.Children.Add(contentScroller);
+        Grid.SetRow(selfhStAttributionL, 4);
+        root.Children.Add(selfhStAttributionL);
+        Grid.SetRow(confirmBarL, 5);
         root.Children.Add(confirmBarL);
 
         searchBox.TextChanged += (s, e) => SelectTab(activeTab, searchBox.Text);
@@ -479,6 +618,7 @@ internal static class IconGallery
         {
             pendingSelectionL = null;
             confirmBtnL.IsEnabled = false;
+            UpdateFlyoutHeightsL();
 
             if (TrayIconModes.IsGlyphMode(currentMode))
             {
@@ -684,10 +824,7 @@ internal static class IconGallery
             {
                 onButtonClicked?.Invoke((Button)s!);
                 // Copy the app icon to the cache directory so IconPath can reference it
-                string cacheDir = Path.Combine(
-                    Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-                    "LittleLauncher", "icons");
-                Directory.CreateDirectory(cacheDir);
+                string cacheDir = GetItemIconCacheDir();
                 string dest = Path.Combine(cacheDir, $"app-{color.ToLowerInvariant()}.png");
                 File.Copy(sourcePath, dest, true);
                 onImageSelected(dest);
@@ -698,10 +835,7 @@ internal static class IconGallery
                 Path.GetFileName(currentImagePath).Equals($"app-{color.ToLowerInvariant()}.png", StringComparison.OrdinalIgnoreCase))
             {
                 onButtonClicked?.Invoke(btn);
-                string cacheDir = Path.Combine(
-                    Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-                    "LittleLauncher", "icons");
-                Directory.CreateDirectory(cacheDir);
+                string cacheDir = GetItemIconCacheDir();
                 string dest = Path.Combine(cacheDir, $"app-{color.ToLowerInvariant()}.png");
                 File.Copy(sourcePath, dest, true);
                 onImageSelected(dest);
@@ -712,6 +846,163 @@ internal static class IconGallery
 
         grid.Children.Add(currentRow);
         panel.Children.Add(grid);
+    }
+
+    private static void BuildSelfhStLoadingContent(StackPanel panel)
+    {
+        panel.Children.Clear();
+        panel.Children.Add(new ProgressRing
+        {
+            IsActive = true,
+            Width = 28,
+            Height = 28,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            Margin = new Thickness(0, 28, 0, 12)
+        });
+        panel.Children.Add(new TextBlock
+        {
+            Text = "Loading selfh.st icons...",
+            FontSize = 13,
+            Opacity = 0.7,
+            HorizontalAlignment = HorizontalAlignment.Center
+        });
+    }
+
+    private static async Task LoadSelfhStContentAsync(
+        StackPanel panel,
+        string query,
+        Action<string> onImageSelected,
+        Action<Button>? onButtonClicked = null,
+        string? currentImagePath = null,
+        Func<bool>? isCurrentRequest = null)
+    {
+        try
+        {
+            var catalog = await GetSelfhStCatalogAsync();
+            if (isCurrentRequest?.Invoke() == false)
+                return;
+
+            var filtered = FilterSelfhStIcons(catalog, query).Take(MaxVisibleSelfhStIcons).ToArray();
+
+            panel.Children.Clear();
+            panel.Children.Add(CategoryHeader("selfh.st Icons"));
+
+            if (string.IsNullOrWhiteSpace(query) && catalog.Count > MaxVisibleSelfhStIcons)
+            {
+                panel.Children.Add(new TextBlock
+                {
+                    Text = $"Showing the first {MaxVisibleSelfhStIcons} icons. Search to narrow the list.",
+                    FontSize = 12,
+                    Opacity = 0.65,
+                    Margin = new Thickness(4, 0, 0, 8),
+                    TextWrapping = TextWrapping.WrapWholeWords
+                });
+            }
+
+            if (filtered.Length == 0)
+            {
+                panel.Children.Add(NoResults());
+                return;
+            }
+
+            var grid = new StackPanel();
+            var currentRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4 };
+            int count = 0;
+
+            foreach (var icon in filtered)
+            {
+                string reference = icon.Reference;
+                string imageUrl = GetSelfhStPngUrl(reference);
+
+                var btn = new Button
+                {
+                    Width = 88,
+                    Height = 92,
+                    Padding = new Thickness(4),
+                    Margin = new Thickness(2),
+                    CornerRadius = new CornerRadius(6),
+                    Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent),
+                    BorderThickness = new Thickness(0)
+                };
+
+                var content = new StackPanel
+                {
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                    Spacing = 4
+                };
+
+                content.Children.Add(new Image
+                {
+                    Width = 32,
+                    Height = 32,
+                    Source = new BitmapImage
+                    {
+                        DecodePixelWidth = 32,
+                        UriSource = new Uri(imageUrl, UriKind.Absolute)
+                    }
+                });
+
+                content.Children.Add(new TextBlock
+                {
+                    Text = icon.Name,
+                    FontSize = 11,
+                    TextAlignment = TextAlignment.Center,
+                    TextWrapping = TextWrapping.WrapWholeWords,
+                    MaxWidth = 76,
+                    MaxLines = 2,
+                    TextTrimming = TextTrimming.CharacterEllipsis,
+                    HorizontalAlignment = HorizontalAlignment.Center
+                });
+
+                btn.Content = content;
+                ToolTipService.SetToolTip(btn, icon.Name);
+                btn.Click += async (s, e) =>
+                {
+                    string? localPath = await CacheSelfhStIconAsync(icon);
+                    if (string.IsNullOrEmpty(localPath))
+                        return;
+
+                    onButtonClicked?.Invoke((Button)s!);
+                    onImageSelected(localPath);
+                };
+
+                if (IsMatchingSelfhStImagePath(currentImagePath, reference))
+                {
+                    onButtonClicked?.Invoke(btn);
+                    onImageSelected(currentImagePath!);
+                }
+
+                currentRow.Children.Add(btn);
+                count++;
+
+                if (count % SelfhStIconsPerRow == 0)
+                {
+                    grid.Children.Add(currentRow);
+                    currentRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4 };
+                }
+            }
+
+            if (currentRow.Children.Count > 0)
+                grid.Children.Add(currentRow);
+
+            panel.Children.Add(grid);
+        }
+        catch
+        {
+            if (isCurrentRequest?.Invoke() == false)
+                return;
+
+            panel.Children.Clear();
+            panel.Children.Add(new TextBlock
+            {
+                Text = "Could not load selfh.st icons. Check your internet connection and try again.",
+                FontSize = 13,
+                Opacity = 0.7,
+                TextAlignment = TextAlignment.Center,
+                TextWrapping = TextWrapping.WrapWholeWords,
+                Margin = new Thickness(16, 24, 16, 0)
+            });
+        }
     }
 
     private static void BuildLauncherPresetsContent(StackPanel panel, string query,
@@ -880,6 +1171,145 @@ internal static class IconGallery
         HorizontalAlignment = HorizontalAlignment.Center,
         Margin = new Thickness(0, 24, 0, 0)
     };
+
+    private static FrameworkElement CreateSelfhStAttributionBar()
+    {
+        var row = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 0,
+            Margin = new Thickness(0, 8, 0, 0),
+            Visibility = Visibility.Collapsed
+        };
+
+        row.Children.Add(new TextBlock
+        {
+            Text = "Icons by ",
+            FontSize = 12,
+            Opacity = 0.7,
+            VerticalAlignment = VerticalAlignment.Center
+        });
+
+        row.Children.Add(new HyperlinkButton
+        {
+            Content = "selfh.st",
+            NavigateUri = SelfhStIconsUri,
+            Padding = new Thickness(0, 0, 6, 0),
+            FontSize = 12,
+            VerticalAlignment = VerticalAlignment.Center
+        });
+
+        row.Children.Add(new TextBlock
+        {
+            Text = "under ",
+            FontSize = 12,
+            Opacity = 0.7,
+            VerticalAlignment = VerticalAlignment.Center
+        });
+
+        row.Children.Add(new HyperlinkButton
+        {
+            Content = "CC BY 4.0",
+            NavigateUri = SelfhStLicenseUri,
+            Padding = new Thickness(0),
+            FontSize = 12,
+            VerticalAlignment = VerticalAlignment.Center
+        });
+
+        return row;
+    }
+
+    private static string GetItemIconCacheDir()
+    {
+        string cacheDir = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+            "LittleLauncher", "icons");
+        Directory.CreateDirectory(cacheDir);
+        return cacheDir;
+    }
+
+    private static string GetSelfhStPngUrl(string reference) =>
+        $"{SelfhStPngUrlPrefix}{Uri.EscapeDataString(reference)}.png";
+
+    private static bool IsSelfhStImagePath(string? path) =>
+        !string.IsNullOrEmpty(path) &&
+        Path.GetFileName(path).StartsWith("selfhst-", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsMatchingSelfhStImagePath(string? path, string reference) =>
+        !string.IsNullOrEmpty(path) &&
+        Path.GetFileName(path).Equals($"selfhst-{reference.ToLowerInvariant()}.png", StringComparison.OrdinalIgnoreCase);
+
+    private static IEnumerable<SelfhStIconEntry> FilterSelfhStIcons(IEnumerable<SelfhStIconEntry> icons, string query)
+    {
+        if (string.IsNullOrWhiteSpace(query))
+            return icons;
+
+        return icons.Where(icon =>
+            icon.Name.Contains(query, StringComparison.OrdinalIgnoreCase) ||
+            icon.Reference.Contains(query, StringComparison.OrdinalIgnoreCase) ||
+            (!string.IsNullOrEmpty(icon.Tags) && icon.Tags.Contains(query, StringComparison.OrdinalIgnoreCase)) ||
+            (!string.IsNullOrEmpty(icon.Category) && icon.Category.Contains(query, StringComparison.OrdinalIgnoreCase)));
+    }
+
+    private static async Task<IReadOnlyList<SelfhStIconEntry>> GetSelfhStCatalogAsync()
+    {
+        if (_selfhStCatalog != null && DateTimeOffset.UtcNow - _selfhStCatalogFetchedAt < SelfhStCatalogTtl)
+            return _selfhStCatalog;
+
+        await SelfhStCatalogLock.WaitAsync();
+        try
+        {
+            if (_selfhStCatalog != null && DateTimeOffset.UtcNow - _selfhStCatalogFetchedAt < SelfhStCatalogTtl)
+                return _selfhStCatalog;
+
+            string json = await SelfhStHttp.GetStringAsync(SelfhStIndexUrl);
+            var icons = JsonSerializer.Deserialize<List<SelfhStIconEntry>>(json, SelfhStJsonOptions)?
+                .Where(icon => !string.IsNullOrWhiteSpace(icon.Name) && !string.IsNullOrWhiteSpace(icon.Reference))
+                .OrderBy(icon => icon.Name, StringComparer.CurrentCultureIgnoreCase)
+                .ToArray() ?? [];
+
+            _selfhStCatalog = icons;
+            _selfhStCatalogFetchedAt = DateTimeOffset.UtcNow;
+            return icons;
+        }
+        finally
+        {
+            SelfhStCatalogLock.Release();
+        }
+    }
+
+    private static async Task<string?> CacheSelfhStIconAsync(SelfhStIconEntry icon)
+    {
+        string cachePath = Path.Combine(GetItemIconCacheDir(), $"selfhst-{icon.Reference.ToLowerInvariant()}.png");
+        if (File.Exists(cachePath))
+            return cachePath;
+
+        try
+        {
+            byte[] bytes = await SelfhStHttp.GetByteArrayAsync(GetSelfhStPngUrl(icon.Reference));
+            await File.WriteAllBytesAsync(cachePath, bytes);
+            return cachePath;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private sealed class SelfhStIconEntry
+    {
+        [JsonPropertyName("Name")]
+        public string Name { get; init; } = "";
+
+        [JsonPropertyName("Reference")]
+        public string Reference { get; init; } = "";
+
+        [JsonPropertyName("Tags")]
+        public string? Tags { get; init; }
+
+        [JsonPropertyName("Category")]
+        public string? Category { get; init; }
+    }
 
     /// <summary>Preset glyph colors available in the icon gallery.</summary>
     private static readonly (string Hex, string Name)[] GlyphColors =
