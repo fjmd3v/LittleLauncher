@@ -575,6 +575,34 @@ internal static partial class FaviconService
         }
     }
 
+    private static bool IsShellExtractedPwaIconPath(string? path)
+        => !string.IsNullOrEmpty(path)
+           && Path.GetFileName(path).StartsWith("pwa_", StringComparison.OrdinalIgnoreCase);
+
+    private static string? TryGetPwaUrl(string aumid)
+    {
+        var match = Regex.Match(aumid,
+            @"^([\w][\w.-]*\.[a-zA-Z]{2,})-[A-Fa-f0-9]+_[a-z0-9]+!App$");
+        return match.Success ? $"https://{match.Groups[1].Value}/" : null;
+    }
+
+    /// <summary>
+    /// For Chromium PWAs, prefer the site's own icon/manifest asset because the shell image
+    /// factory often returns a softer rasterized bitmap than the original web icon.
+    /// </summary>
+    public static async Task<string?> GetBestPwaIconAsync(string aumid)
+    {
+        string? pwaUrl = TryGetPwaUrl(aumid);
+        if (!string.IsNullOrEmpty(pwaUrl))
+        {
+            string? webIcon = GetCachedPath(pwaUrl) ?? await FetchAndCacheAsync(pwaUrl);
+            if (!string.IsNullOrEmpty(webIcon))
+                return webIcon;
+        }
+
+        return GetPwaIconFromShell(aumid);
+    }
+
     // ── Batch icon pipeline ────────────────────────────────────────
 
     /// <summary>
@@ -595,8 +623,12 @@ internal static partial class FaviconService
             if (string.IsNullOrWhiteSpace(item.Path))
                 continue;
 
-            // Already has a valid local icon
-            if (!string.IsNullOrEmpty(item.IconPath) && File.Exists(item.IconPath))
+            bool hasExistingIcon = !string.IsNullOrEmpty(item.IconPath) && File.Exists(item.IconPath);
+            bool shouldUpgradeShellPwaIcon = item.IsPwa && hasExistingIcon && IsShellExtractedPwaIconPath(item.IconPath);
+
+            // Already has a valid local icon.
+            // Existing shell-extracted PWA icons are upgraded opportunistically to the site's own icon.
+            if (hasExistingIcon && !shouldUpgradeShellPwaIcon)
                 continue;
 
             try
@@ -610,25 +642,12 @@ internal static partial class FaviconService
                 }
                 else if (item.IsPwa)
                 {
-                    // Try extracting icon from Windows shell registration first
-                    iconPath = GetPwaIconFromShell(item.Path);
-
-                    // Fall back to web favicon from the PWA domain
-                    if (string.IsNullOrEmpty(iconPath))
-                    {
-                        var match = System.Text.RegularExpressions.Regex.Match(item.Path,
-                            @"^([\w][\w.-]*\.[a-zA-Z]{2,})-[A-Fa-f0-9]+_[a-z0-9]+!App$");
-                        if (match.Success)
-                        {
-                            string url = $"https://{match.Groups[1].Value}/";
-                            iconPath = GetCachedPath(url) ?? await FetchAndCacheAsync(url);
-                        }
-                    }
+                    iconPath = await GetBestPwaIconAsync(item.Path);
                 }
                 else if (item.Path.StartsWith(@"shell:AppsFolder\", StringComparison.OrdinalIgnoreCase))
                 {
                     string aumid = item.Path[@"shell:AppsFolder\".Length..];
-                    iconPath = GetPwaIconFromShell(aumid);
+                    iconPath = await GetBestPwaIconAsync(aumid);
                 }
                 else
                 {

@@ -38,7 +38,8 @@ Commit the current changes to git.
    - If docs were updated, append " and update docs" to the subject or note it in the body
 
 4. **Commit**:
-   - Show the proposed commit message and ask the user to confirm or adjust
+   - If the user has already provided or approved the commit message, proceed directly
+   - Otherwise, choose the best message from the diff and commit without requiring a confirmation round-trip
    - `git commit -m "<message>"`
 
 5. **Push**:

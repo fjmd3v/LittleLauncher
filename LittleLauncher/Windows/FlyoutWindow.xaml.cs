@@ -737,7 +737,11 @@ public partial class FlyoutWindow : Window
         int iconSize = GetActiveIconSize();
         if (!string.IsNullOrEmpty(item.IconPath) && File.Exists(item.IconPath))
         {
-            var bmp = new BitmapImage { DecodePixelWidth = iconSize + 4 };
+            var bmp = new BitmapImage
+            {
+                DecodePixelType = DecodePixelType.Logical,
+                DecodePixelWidth = iconSize + 4,
+            };
             bmp.UriSource = new Uri(item.IconPath, UriKind.Absolute);
             iconElement = new Image
             {

@@ -17,7 +17,15 @@ public sealed class IconPathToImageConverter : IValueConverter
     {
         if (value is string path && !string.IsNullOrEmpty(path) && File.Exists(path))
         {
-            var bmp = new BitmapImage { DecodePixelWidth = 24 };
+            int decodePixelWidth = 24;
+            if (parameter is string parameterText && int.TryParse(parameterText, out int parsedWidth) && parsedWidth > 0)
+                decodePixelWidth = parsedWidth;
+
+            var bmp = new BitmapImage
+            {
+                DecodePixelType = DecodePixelType.Logical,
+                DecodePixelWidth = decodePixelWidth,
+            };
             bmp.UriSource = new Uri(path, UriKind.Absolute);
             return bmp;
         }

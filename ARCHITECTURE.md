@@ -13,8 +13,6 @@ App.xaml  →  MainWindow (invisible, owns tray icon)
                       └── AboutPage
 ```
 
-Each launcher's native tray icon is registered with Shell_NotifyIcon using a stable GUID derived from `Launcher.Id` in addition to the runtime `uID`. This gives Windows a persistent identity for the icon so tray visibility/pin state survives app restarts and Store-driven MSIX updates.
-
 ## LauncherItemsPage multi-column layout and drag-and-drop
 
 The Launcher Items settings page renders items in a multi-column `Grid` (`ColumnsPanel`). The flat `Items` collection is split at `IsColumnBreak` sentinel items into per-column `ObservableCollection<LauncherItem>` lists by `BuildColumnLists()`. Each column gets its own `ListView` (fixed 280px wide), with column headers showing "Column N" and a remove button (except column 1). Users add columns via "Add Column" and remove them via the column header delete button (which merges items into the previous column). Each item/group card has a `...` context menu button (visible on hover via Opacity toggling) with Move up/down, Move to…, Edit, and Remove actions.
@@ -102,7 +100,6 @@ For pinned taskbar launches, `MainWindow` now tries to resolve the actual taskba
 **Multi-column & multi-view layout**: The flyout renders items into a horizontal `ColumnsPanel` (a `StackPanel`). Each `LauncherItem` with `IsColumnBreak = true` starts a new column. The display mode is controlled by `Launcher.ViewMode`:
 - **Icon view** (ViewMode = 0, default): Each column is a `ListView` of grouped sections. Real groups render a heading plus a nested icon-grid child `ListView`, while consecutive ungrouped items are wrapped into synthetic groups so they render in the same wrapping grid surface. `Launcher.IconModeIconsPerRow` controls the maximum icons shown across each row (default 3, configurable from 1 to 12), the flyout shrinks each column to the widest row actually present so sparse layouts do not keep extra horizontal whitespace, and dragging near the flyout's left or right edge snaps the layout wider or narrower by whole icon columns without opening settings.
 - **List view** (ViewMode = 1): Each column is a drag-enabled `ListView` of top-level items and groups. Real groups render a heading plus a nested child `ListView`, so items can be dragged within groups, out to the top level, or between columns while keeping the flyout visuals close to the editor.
-- **Small icon view** (ViewMode = 2): Uses the same wrapping grid and reorder model as icon view, but tiles are reduced to tray-sized squares and item labels are removed. Real groups are separated by spacing only, so the popup can visually match the Windows tray/overflow grid.
 
 `RebuildColumnsPanel()` rebuilds all columns (icon grid or ListView) from scratch whenever items change. Window width scales per column: 175 px for list view, or a dynamic icon-mode width derived from the configured icons-per-row value.
 
@@ -132,4 +129,4 @@ At startup, `EnsureFlyoutShortcut()` copies the companion exe to `%AppData%\\Lit
 - **Image assets** in `LittleLauncherMSIX/Images/` use standard MRT naming qualifiers (e.g. `.scale-200.`, `.targetsize-48.`) and are indexed into `resources.pri` by `makepri`.
 - **Companion exe** is deployed to `%AppData%\\LittleLauncher\\` at startup for all build types. See \"Companion exe\" section above.
 - **`-NoSign` flag** skips all signing for Store uploads (Microsoft re-signs during ingestion). Without `-NoSign`, the script signs with a self-signed dev cert or a trusted PFX.
-- **Updates use two runtime paths**: unpackaged/WiX installs use the GitHub Releases + MSI updater, while packaged installs use `Windows.Services.Store.StoreContext` to check for Microsoft Store updates and request download/install from the Store. After a successful Store update, `UpdateService` writes a helper script that waits for the current process to exit and relaunches the packaged app through `explorer.exe shell:AppsFolder\<PackageFamilyName>!App`, so the app comes back up like the MSI path. Startup prefetch runs for both so Home/About can reuse the cached result. Only unpackaged builds show the custom toast notification because the packaged path uses Store-managed UI instead.
+- **Update checks and toast notifications** are disabled in MSIX builds — the Store handles updates. The GitHub-based update UI on Home/About pages is hidden.

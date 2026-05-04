@@ -1,186 +1,194 @@
 {
-    "version": "2.0.0",
-    "tasks": [
-        {
-            "label": "stop-app",
-            "type": "shell",
-            "command": "Stop-Process -Name LittleLauncher -Force -ErrorAction SilentlyContinue; exit 0",
-            "problemMatcher": [],
-            "presentation": {
-                "reveal": "silent"
-            }
-        },
-        {
-            "label": "build-x64",
-            "command": "dotnet",
-            "type": "process",
-            "args": [
-                "build",
-                "${workspaceFolder}/LittleLauncher/LittleLauncher.csproj",
-                "-c",
-                "Debug",
-                "-p:Platform=x64"
-            ],
-            "dependsOn": "stop-app",
-            "problemMatcher": "$msCompile"
-        },
-        {
-            "label": "build-arm64",
-            "command": "dotnet",
-            "type": "process",
-            "args": [
-                "build",
-                "${workspaceFolder}/LittleLauncher/LittleLauncher.csproj",
-                "-c",
-                "Debug",
-                "-p:Platform=ARM64"
-            ],
-            "dependsOn": "stop-app",
-            "problemMatcher": "$msCompile",
-            "group": {
-                "kind": "build",
-                "isDefault": true
-            }
-        },
-        {
-            "label": "build-x64-release",
-            "command": "dotnet",
-            "type": "process",
-            "args": [
-                "build",
-                "${workspaceFolder}/LittleLauncher/LittleLauncher.csproj",
-                "-c",
-                "Release",
-                "-p:Platform=x64"
-            ],
-            "dependsOn": "stop-app",
-            "problemMatcher": "$msCompile"
-        },
-        {
-            "label": "build-arm64-release",
-            "command": "dotnet",
-            "type": "process",
-            "args": [
-                "build",
-                "${workspaceFolder}/LittleLauncher/LittleLauncher.csproj",
-                "-c",
-                "Release",
-                "-p:Platform=ARM64"
-            ],
-            "dependsOn": "stop-app",
-            "problemMatcher": "$msCompile"
-        },
-        {
-            "label": "installer-x64",
-            "type": "shell",
-            "command": "dotnet build LittleLauncherSetup/LittleLauncherSetup.wixproj -p:Platform=x64 -c Release \"-p:BuildOutputPath=${workspaceFolder}/LittleLauncher/bin/x64/Release/net10.0-windows10.0.22000.0\"",
-            "dependsOn": "build-x64-release",
-            "problemMatcher": "$msCompile"
-        },
-        {
-            "label": "installer-arm64",
-            "type": "shell",
-            "command": "dotnet build LittleLauncherSetup/LittleLauncherSetup.wixproj -p:Platform=ARM64 -c Release \"-p:BuildOutputPath=${workspaceFolder}/LittleLauncher/bin/ARM64/Release/net10.0-windows10.0.22000.0\"",
-            "dependsOn": "build-arm64-release",
-            "problemMatcher": "$msCompile"
-        },
-        {
-            "label": "run-x64",
-            "type": "shell",
-            "command": "Start-Process '${workspaceFolder}/LittleLauncher/bin/x64/Debug/net10.0-windows10.0.22000.0/LittleLauncher.exe'",
-            "dependsOn": "build-x64",
-            "problemMatcher": [],
-            "presentation": {
-                "reveal": "silent"
-            }
-        },
-        {
-            "label": "run-arm64",
-            "type": "shell",
-            "command": "Start-Process '${workspaceFolder}/LittleLauncher/bin/ARM64/Debug/net10.0-windows10.0.22000.0/LittleLauncher.exe'",
-            "dependsOn": "build-arm64",
-            "problemMatcher": [],
-            "presentation": {
-                "reveal": "silent"
-            }
-        },
-        {
-            "label": "watch-x64",
-            "command": "dotnet",
-            "type": "process",
-            "args": [
-                "watch",
-                "--project",
-                "${workspaceFolder}/LittleLauncher/LittleLauncher.csproj",
-                "run",
-                "-c",
-                "Debug",
-                "-p:Platform=x64"
-            ],
-            "problemMatcher": "$msCompile",
-            "isBackground": true,
-            "presentation": {
-                "reveal": "always",
-                "panel": "dedicated"
-            }
-        },
-        {
-            "label": "watch-arm64",
-            "command": "dotnet",
-            "type": "process",
-            "args": [
-                "watch",
-                "--project",
-                "${workspaceFolder}/LittleLauncher/LittleLauncher.csproj",
-                "run",
-                "-c",
-                "Debug",
-                "-p:Platform=ARM64"
-            ],
-            "problemMatcher": "$msCompile",
-            "isBackground": true,
-            "presentation": {
-                "reveal": "always",
-                "panel": "dedicated"
-            }
-        },
-        {
-            "label": "clean",
-            "command": "dotnet",
-            "type": "process",
-            "args": [
-                "clean",
-                "${workspaceFolder}/LittleLauncher/LittleLauncher.csproj"
-            ],
-            "problemMatcher": []
-        },
-        {
-            "label": "msix-x64",
-            "type": "shell",
-            "command": ".\\LittleLauncherMSIX\\build-msix.ps1 -Platform x64",
-            "dependsOn": "stop-app",
-            "problemMatcher": "$msCompile"
-        },
-        {
-            "label": "msix-arm64",
-            "type": "shell",
-            "command": ".\\LittleLauncherMSIX\\build-msix.ps1 -Platform ARM64",
-            "dependsOn": "stop-app",
-            "problemMatcher": "$msCompile"
-        },
-        {
-            "label": "msix-x64-store",
-            "type": "shell",
-            "command": ".\\LittleLauncherMSIX\\build-msix.ps1 -Platform x64 -NoSign",
-            "dependsOn": "stop-app",
-            "problemMatcher": "$msCompile"
-        },
-        {
-            "label": "msix-arm64-store",
-            "type": "shell",
-            "command": ".\\LittleLauncherMSIX\\build-msix.ps1 -Platform ARM64 -NoSign",
-            "dependsOn": "stop-app",
-            "problemMatcher": "$msCompile"
-        }
-    ]
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "stop-app",
+			"type": "shell",
+			"command": "Stop-Process -Name LittleLauncher -Force -ErrorAction SilentlyContinue; exit 0",
+			"problemMatcher": [],
+			"presentation": {
+				"reveal": "silent"
+			}
+		},
+		{
+			"label": "build-debug-x64",
+			"command": "dotnet",
+			"type": "process",
+			"args": [
+				"build",
+				"${workspaceFolder}/LittleLauncher/LittleLauncher.csproj",
+				"-c",
+				"Debug",
+				"-p:Platform=x64"
+			],
+			"dependsOn": "stop-app",
+			"problemMatcher": "$msCompile"
+		},
+		{
+			"label": "build-debug-arm64",
+			"command": "dotnet",
+			"type": "process",
+			"args": [
+				"build",
+				"${workspaceFolder}/LittleLauncher/LittleLauncher.csproj",
+				"-c",
+				"Debug",
+				"-p:Platform=ARM64"
+			],
+			"dependsOn": "stop-app",
+			"problemMatcher": "$msCompile",
+			"group": {
+				"kind": "build",
+				"isDefault": true
+			}
+		},
+		{
+			"label": "build-release-x64",
+			"command": "dotnet",
+			"type": "process",
+			"args": [
+				"build",
+				"${workspaceFolder}/LittleLauncher/LittleLauncher.csproj",
+				"-c",
+				"Release",
+				"-p:Platform=x64"
+			],
+			"dependsOn": "stop-app",
+			"problemMatcher": "$msCompile"
+		},
+		{
+			"label": "build-release-arm64",
+			"command": "dotnet",
+			"type": "process",
+			"args": [
+				"build",
+				"${workspaceFolder}/LittleLauncher/LittleLauncher.csproj",
+				"-c",
+				"Release",
+				"-p:Platform=ARM64"
+			],
+			"dependsOn": "stop-app",
+			"problemMatcher": "$msCompile"
+		},
+		{
+			"label": "build-installer-x64",
+			"type": "shell",
+			"command": "dotnet build LittleLauncherSetup/LittleLauncherSetup.wixproj -p:Platform=x64 -c Release \"-p:BuildOutputPath=${workspaceFolder}/LittleLauncher/bin/x64/Release/net10.0-windows10.0.22000.0\"",
+			"dependsOn": "build-release-x64",
+			"problemMatcher": "$msCompile"
+		},
+		{
+			"label": "build-installer-arm64",
+			"type": "shell",
+			"command": "dotnet build LittleLauncherSetup/LittleLauncherSetup.wixproj -p:Platform=ARM64 -c Release \"-p:BuildOutputPath=${workspaceFolder}/LittleLauncher/bin/ARM64/Release/net10.0-windows10.0.22000.0\"",
+			"dependsOn": "build-release-arm64",
+			"problemMatcher": "$msCompile"
+		},
+		{
+			"label": "run-debug-x64",
+			"type": "shell",
+			"command": "Start-Process '${workspaceFolder}/LittleLauncher/bin/x64/Debug/net10.0-windows10.0.22000.0/LittleLauncher.exe'",
+			"dependsOn": "build-debug-x64",
+			"problemMatcher": [],
+			"presentation": {
+				"reveal": "silent"
+			}
+		},
+		{
+			"label": "run-debug-arm64",
+			"type": "shell",
+			"command": "Start-Process '${workspaceFolder}/LittleLauncher/bin/ARM64/Debug/net10.0-windows10.0.22000.0/LittleLauncher.exe'",
+			"dependsOn": "build-debug-arm64",
+			"problemMatcher": [],
+			"presentation": {
+				"reveal": "silent"
+			}
+		},
+		{
+			"label": "watch-debug-x64",
+			"command": "dotnet",
+			"type": "process",
+			"args": [
+				"watch",
+				"--project",
+				"${workspaceFolder}/LittleLauncher/LittleLauncher.csproj",
+				"run",
+				"-c",
+				"Debug",
+				"-p:Platform=x64"
+			],
+			"problemMatcher": "$msCompile",
+			"isBackground": true,
+			"presentation": {
+				"reveal": "always",
+				"panel": "dedicated"
+			}
+		},
+		{
+			"label": "watch-debug-arm64",
+			"command": "dotnet",
+			"type": "process",
+			"args": [
+				"watch",
+				"--project",
+				"${workspaceFolder}/LittleLauncher/LittleLauncher.csproj",
+				"run",
+				"-c",
+				"Debug",
+				"-p:Platform=ARM64"
+			],
+			"problemMatcher": "$msCompile",
+			"isBackground": true,
+			"presentation": {
+				"reveal": "always",
+				"panel": "dedicated"
+			}
+		},
+		{
+			"label": "clean",
+			"command": "dotnet",
+			"type": "process",
+			"args": [
+				"clean",
+				"${workspaceFolder}/LittleLauncher/LittleLauncher.csproj"
+			],
+			"problemMatcher": []
+		},
+		{
+			"label": "build-msix-debug-x64",
+			"type": "shell",
+			"command": ".\\LittleLauncherMSIX\\build-msix.ps1 -Platform x64",
+			"dependsOn": "stop-app",
+			"problemMatcher": "$msCompile"
+		},
+		{
+			"label": "build-msix-debug-arm64",
+			"type": "shell",
+			"command": ".\\LittleLauncherMSIX\\build-msix.ps1 -Platform ARM64",
+			"dependsOn": "stop-app",
+			"problemMatcher": "$msCompile"
+		},
+		{
+			"label": "build-msix-store-x64",
+			"type": "shell",
+			"command": ".\\LittleLauncherMSIX\\build-msix.ps1 -Platform x64 -NoSign",
+			"dependsOn": "stop-app",
+			"problemMatcher": "$msCompile"
+		},
+		{
+			"label": "build-msix-store-arm64",
+			"type": "shell",
+			"command": ".\\LittleLauncherMSIX\\build-msix.ps1 -Platform ARM64 -NoSign",
+			"dependsOn": "stop-app",
+			"problemMatcher": "$msCompile"
+		},
+		{
+			"label": "build-msix-store-all",
+			"type": "shell",
+			"command": "Stop-Process -Name LittleLauncher -Force -ErrorAction SilentlyContinue; .\\LittleLauncherMSIX\\build-msix.ps1 -Platform x64 -NoSign; .\\LittleLauncherMSIX\\build-msix.ps1 -Platform ARM64 -NoSign",
+			"problemMatcher": [
+				"$msCompile"
+			]
+		}
+	]
 }

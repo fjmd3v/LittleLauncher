@@ -2119,11 +2119,10 @@ public partial class LauncherItemsPage : Page
                 argsBox.Text = "";
                 populating = false;
 
-                // Extract icon from Windows shell registration (preferred), fall back to web favicon
+                // Prefer the PWA's own web icon/manifest asset; fall back to the shell image.
                 iconStatus.Text = "Fetching icon...";
                 refreshButton.IsEnabled = false;
-                var iconPath = FaviconService.GetPwaIconFromShell(pwa.Aumid)
-                    ?? await FaviconService.FetchAndCacheAsync($"https://{pwa.Domain}/");
+                var iconPath = await FaviconService.GetBestPwaIconAsync(pwa.Aumid);
                 refreshButton.IsEnabled = true;
                 if (!string.IsNullOrEmpty(iconPath))
                 {

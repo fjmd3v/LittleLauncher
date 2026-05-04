@@ -254,7 +254,7 @@
                     <!-- Icon image (shown when IconPath file exists) -->
                     <Image
                         Grid.Column="0"
-                        Source="{Binding IconPath, Converter={StaticResource IconPathToImage}}"
+                        Source="{Binding IconPath, Converter={StaticResource IconPathToImage}, ConverterParameter=20}"
                         Visibility="{Binding IconPath, Converter={StaticResource IconPathToVisibility}}"
                         Width="20" Height="20"
                         VerticalAlignment="Center" />
@@ -292,14 +292,14 @@
             <DataTemplate x:Key="IconItemTemplate">
                 <Grid Width="80" Height="84">
                     <Grid.RowDefinitions>
-                        <RowDefinition Height="*" />
-                        <RowDefinition Height="32" />
+                        <RowDefinition Height="48" />
+                        <RowDefinition Height="36" />
                     </Grid.RowDefinitions>
 
                     <Grid Grid.Row="0"
                           HorizontalAlignment="Center"
                           VerticalAlignment="Center">
-                        <Image Source="{Binding IconPath, Converter={StaticResource IconPathToImage}}"
+                                                <Image Source="{Binding IconPath, Converter={StaticResource IconPathToImage}, ConverterParameter=32}"
                                Visibility="{Binding IconPath, Converter={StaticResource IconPathToVisibility}}"
                                Width="32"
                                Height="32" />
@@ -337,7 +337,7 @@
                 <Grid Width="40" Height="40">
                     <Grid HorizontalAlignment="Center"
                           VerticalAlignment="Center">
-                        <Image Source="{Binding IconPath, Converter={StaticResource IconPathToImage}}"
+                                                <Image Source="{Binding IconPath, Converter={StaticResource IconPathToImage}, ConverterParameter=20}"
                                Visibility="{Binding IconPath, Converter={StaticResource IconPathToVisibility}}"
                                Width="20"
                                Height="20" />
