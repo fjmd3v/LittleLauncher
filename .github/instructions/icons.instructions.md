@@ -171,7 +171,7 @@ Entry points that call the pipeline:
 - **File import**: `LauncherItemsPage.ImportItems_Click()` — awaited before save.
 - **Manual add/edit**: calls `FaviconService.FetchAndCacheAsync()` / `GetApplicationIcon()` directly for the single item in the dialog.
 
-For Chromium PWAs, prefer the site's own icon/manifest asset when the AUMID encodes a domain (for example `example.com-HEX_hash!App`). The shell image factory often returns a softer rasterized bitmap than the original web icon. `GetBestPwaIconAsync()` handles this preference and falls back to `GetPwaIconFromShell()` when the site icon cannot be fetched.
+For Chromium PWAs, prefer the site's own icon/manifest asset when the AUMID encodes a domain (for example `example.com-HEX_hash!App`). The shell image factory often returns a softer rasterized bitmap than the original web icon. `GetBestPwaIconAsync()` handles this preference, but it must reject off-origin login redirects and skip generic Google favicon-service fallbacks for PWAs; when the site does not expose a real app icon, it should fall back to `GetPwaIconFromShell()`.
 
 After any bulk icon change, call `FlyoutWindow.InvalidateItems()` so the flyout rebuilds its item containers on the next toggle. The flyout's `RebuildItemsIfNeeded()` nulls `ItemsSource` before reassigning to force full container recreation.
 

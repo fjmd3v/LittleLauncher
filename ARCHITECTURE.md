@@ -49,7 +49,7 @@ By default, launching the app opens the Settings window. Silent mode (tray icon 
 | SFTP sync download | `SftpSyncService.DownloadLaunchersAsync()` |
 | File import (Launcher Items page) | `LauncherItemsPage.ImportItems_Click()` |
 | Manual add/edit | `DoFetch()` in add/edit dialog (calls `FaviconService` directly for the single item) |
-| PWA add | PWA combo selection handler (extracts shell icon via `FaviconService.GetPwaIconFromShell`, falls back to web favicon) |
+| PWA add | PWA combo selection handler (`FaviconService.GetBestPwaIconAsync()`: prefers a real site/manifest icon, rejects off-origin login redirects, then falls back to the installed shell icon) |
 
 After bulk icon changes, callers invoke `FlyoutWindow.InvalidateItems()` so the flyout rebuilds its containers on the next toggle.
 

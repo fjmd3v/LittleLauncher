@@ -39,6 +39,9 @@ internal static partial class FaviconService
     /// Returns null if the download fails.
     /// </summary>
     public static async Task<string?> FetchAndCacheAsync(string url)
+        => await FetchAndCacheCoreAsync(url, allowGoogleFaviconFallback: true, preferCachedResult: true);
+
+    private static async Task<string?> FetchAndCacheCoreAsync(string url, bool allowGoogleFaviconFallback, bool preferCachedResult)
     {
         try
         {
@@ -52,12 +55,14 @@ internal static partial class FaviconService
             Directory.CreateDirectory(CacheDir);
             string localPath = Path.Combine(CacheDir, $"{host}.png");
             string baseUrl = $"{uri.Scheme}://{uri.Authority}";
+            if (preferCachedResult && File.Exists(localPath))
+                return localPath;
 
             // 1. Try PWA manifest icons / HTML link icons from the page (preferred)
-            byte[]? bytes = await TryFetchIconFromSiteAsync(baseUrl);
+            byte[]? bytes = await TryFetchIconFromSiteAsync(url);
 
             // 2. Try Google's favicon service (works well for public sites)
-            if (bytes == null || bytes.Length < 100)
+            if (allowGoogleFaviconFallback && (bytes == null || bytes.Length < 100))
                 bytes = await TryDownloadAsync(Http,
                     $"https://www.google.com/s2/favicons?domain={Uri.EscapeDataString(host)}&sz=64");
 
@@ -83,16 +88,29 @@ internal static partial class FaviconService
     /// Fetches the site's HTML, looks for a PWA manifest link and HTML link icons.
     /// Returns the best icon bytes found, or null.
     /// </summary>
-    private static async Task<byte[]?> TryFetchIconFromSiteAsync(string baseUrl)
+    private static async Task<byte[]?> TryFetchIconFromSiteAsync(string pageUrl)
     {
         try
         {
-            using var request = new HttpRequestMessage(HttpMethod.Get, baseUrl);
+            if (!Uri.TryCreate(pageUrl, UriKind.Absolute, out var pageUri))
+                return null;
+
+            string baseUrl = $"{pageUri.Scheme}://{pageUri.Authority}";
+
+            using var request = new HttpRequestMessage(HttpMethod.Get, pageUrl);
             request.Headers.Add("User-Agent", "Mozilla/5.0");
 
             using var response = await TolerantHttp.SendAsync(request, HttpCompletionOption.ResponseHeadersRead);
             if (!response.IsSuccessStatusCode)
                 return null;
+
+            // Auth-gated apps like Google Keep / Tasks often redirect to accounts.google.com.
+            // Treat off-origin HTML as unusable so PWAs can fall back to their installed shell icon.
+            if (response.RequestMessage?.RequestUri is Uri finalUri
+                && !string.Equals(finalUri.Host, pageUri.Host, StringComparison.OrdinalIgnoreCase))
+            {
+                return null;
+            }
 
             using var stream = await response.Content.ReadAsStreamAsync();
             using var reader = new StreamReader(stream);
@@ -161,7 +179,7 @@ internal static partial class FaviconService
         }
         catch (Exception ex)
         {
-            Logger.Debug(ex, $"Failed to parse site HTML for icons: {baseUrl}");
+            Logger.Debug(ex, $"Failed to parse site HTML for icons: {pageUrl}");
         }
 
         return null;
@@ -595,7 +613,7 @@ internal static partial class FaviconService
         string? pwaUrl = TryGetPwaUrl(aumid);
         if (!string.IsNullOrEmpty(pwaUrl))
         {
-            string? webIcon = GetCachedPath(pwaUrl) ?? await FetchAndCacheAsync(pwaUrl);
+            string? webIcon = await FetchAndCacheCoreAsync(pwaUrl, allowGoogleFaviconFallback: false, preferCachedResult: false);
             if (!string.IsNullOrEmpty(webIcon))
                 return webIcon;
         }
