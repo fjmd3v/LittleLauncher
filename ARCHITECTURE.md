@@ -103,7 +103,7 @@ For pinned taskbar launches, `MainWindow` now tries to resolve the actual taskba
 
 `RebuildColumnsPanel()` rebuilds all columns (icon grid or ListView) from scratch whenever items change. Window width scales per column: 175 px for list view, or a dynamic icon-mode width derived from the configured icons-per-row value.
 
-**Right-click context menu**: Right-clicking empty space in the flyout shows a `ContextFlyout` with a "Settings" option that dismisses the flyout and opens `SettingsWindow`.
+**Right-click context menu**: Right-clicking empty space in the flyout shows a `ContextFlyout` with launcher/settings shortcuts. Right-clicking an item opens an item menu with Move up/down, Move to…, Edit, and Remove actions, so common item maintenance can happen directly in the live flyout without opening the Launcher Items page.
 
 ## Companion exe (`LauncherShortcut`)
 

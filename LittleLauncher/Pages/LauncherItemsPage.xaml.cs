@@ -663,6 +663,15 @@ public partial class LauncherItemsPage : Page
         e.Handled = true;
     }
 
+    private void ItemCard_RightTapped(object sender, Microsoft.UI.Xaml.Input.RightTappedRoutedEventArgs e)
+    {
+        if (_isReadOnly) return;
+        if (sender is not FrameworkElement anchor || anchor.DataContext is not LauncherItem item) return;
+
+        ShowItemContextMenu(anchor, item, item.IsGroup);
+        e.Handled = true;
+    }
+
     private static bool IsGroupCard(Border border) =>
         border.Child is StackPanel sp && sp.Tag as string == "GroupRoot";
 
@@ -2273,6 +2282,8 @@ public partial class LauncherItemsPage : Page
                 name = comboApp.DisplayName;
             else if (isWebsite)
                 name = await FaviconService.FetchWebsiteTitleAsync(finalPath) ?? finalPath;
+            else if (isPwa && pwaCombo.SelectedItem is InstalledPwa selectedPwa)
+                name = selectedPwa.DisplayName;
             else if (isPwa)
                 name = finalPath;
             else if (finalPath.StartsWith(@"shell:AppsFolder\", StringComparison.OrdinalIgnoreCase))

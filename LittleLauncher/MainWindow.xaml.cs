@@ -355,10 +355,12 @@ public sealed partial class MainWindow : Window
                     sw?.DispatcherQueue.TryEnqueue(() => sw.NavigateToLauncherItems(launcher));
                 };
                 popup.Items.Add(editItems);
+
+                popup.Items.Add(new H.NotifyIcon.Core.PopupMenuSeparator());
             }
         }
 
-        var settingsItem = new H.NotifyIcon.Core.PopupMenuItem { Text = "Settings" };
+        var settingsItem = new H.NotifyIcon.Core.PopupMenuItem { Text = "App Settings" };
         settingsItem.Click += (s, e) => SettingsWindow.ShowInstance(this);
         popup.Items.Add(settingsItem);
         popup.Items.Add(new H.NotifyIcon.Core.PopupMenuSeparator());

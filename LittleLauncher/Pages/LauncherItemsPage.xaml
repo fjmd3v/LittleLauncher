@@ -16,6 +16,7 @@
                     BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
                     BorderThickness="1" CornerRadius="4" Padding="12" Margin="0,2"
                     Loaded="ItemCard_Loaded"
+                    RightTapped="ItemCard_RightTapped"
                     PointerEntered="ItemCard_PointerEntered" PointerExited="ItemCard_PointerExited">
                 <Grid ColumnSpacing="12">
                     <Grid.ColumnDefinitions>
@@ -63,7 +64,8 @@
                     Loaded="ItemCard_Loaded"
                     PointerEntered="ItemCard_PointerEntered" PointerExited="ItemCard_PointerExited">
                 <StackPanel Tag="GroupRoot" Loaded="GroupRoot_Loaded">
-                    <Grid ColumnSpacing="8" Padding="12,10">
+                    <Grid ColumnSpacing="8" Padding="12,10"
+                          RightTapped="ItemCard_RightTapped">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="Auto"/>
                             <ColumnDefinition Width="Auto"/>
@@ -129,6 +131,7 @@
                     BorderThickness="1" CornerRadius="6" Padding="4" Margin="2"
                     Width="80" Height="86"
                     Loaded="ItemCard_Loaded"
+                    RightTapped="ItemCard_RightTapped"
                     PointerEntered="ItemCard_PointerEntered" PointerExited="ItemCard_PointerExited">
                 <Grid>
                     <Grid.RowDefinitions>
@@ -189,7 +192,8 @@
                     Loaded="ItemCard_Loaded"
                     PointerEntered="ItemCard_PointerEntered" PointerExited="ItemCard_PointerExited">
                 <StackPanel Tag="GroupRoot" Loaded="GroupRoot_Loaded">
-                    <Grid ColumnSpacing="8" Padding="8,8">
+                    <Grid ColumnSpacing="8" Padding="8,8"
+                          RightTapped="ItemCard_RightTapped">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="Auto"/>
                             <ColumnDefinition Width="Auto"/>

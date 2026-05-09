@@ -20,6 +20,7 @@ using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Imaging;
 using Microsoft.UI.Windowing;
 using Microsoft.UI;
+using global::Windows.Storage.Pickers;
 using WinRT.Interop;
 using static LittleLauncher.Classes.NativeMethods;
 using Launcher = LittleLauncher.Models.Launcher;
@@ -108,6 +109,7 @@ public partial class FlyoutWindow : Window
     private bool IsListMode => CurrentViewMode == LauncherViewModes.List;
     private bool IsSmallIconMode => CurrentViewMode == LauncherViewModes.SmallIcon;
     private bool IsIconMode => LauncherViewModes.IsIconMode(CurrentViewMode);
+    private bool IsReadOnlyLauncher => _launcher is { IsShared: true, IsSharedOwner: false };
 
     private FlyoutWindow(MainWindow owner, Launcher launcher)
     {
@@ -569,7 +571,7 @@ public partial class FlyoutWindow : Window
         ScrollViewer.SetHorizontalScrollBarVisibility(lv, ScrollBarVisibility.Disabled);
         lv.Loaded += ColumnListView_Loaded;
         lv.ItemClick += ItemsListControl_ItemClick;
-        lv.RightTapped += ItemsListControl_RightTapped;
+        lv.ContextRequested += ItemsListControl_ContextRequested;
         lv.DragItemsStarting += ColumnListView_DragItemsStarting;
         lv.DragOver += ColumnListView_DragOver;
         lv.DragLeave += ColumnListView_DragLeave;
@@ -815,7 +817,7 @@ public partial class FlyoutWindow : Window
             Tag = item,
         };
         tile.Click += IconTile_Click;
-        tile.RightTapped += IconTile_RightTapped;
+        tile.ContextRequested += IconTile_ContextRequested;
         return tile;
     }
 
@@ -825,15 +827,12 @@ public partial class FlyoutWindow : Window
             LaunchItem(item);
     }
 
-    private void IconTile_RightTapped(object sender, RightTappedRoutedEventArgs e)
+    private void IconTile_ContextRequested(UIElement sender, ContextRequestedEventArgs e)
     {
         if (sender is Button btn && btn.Tag is LauncherItem item && !item.IsGroup)
         {
-            var flyout = new MenuFlyout();
-            var editItem = new MenuFlyoutItem { Text = "Edit" };
-            editItem.Click += (_, _) => EditItem(item);
-            flyout.Items.Add(editItem);
-            flyout.ShowAt(btn);
+            ShowItemContextMenu(btn, item);
+            e.Handled = true;
         }
     }
 
@@ -1639,25 +1638,233 @@ public partial class FlyoutWindow : Window
         }
     }
 
-    private void ItemsListControl_RightTapped(object sender, RightTappedRoutedEventArgs e)
+    private void ItemsListControl_ContextRequested(UIElement sender, ContextRequestedEventArgs e)
     {
-        if (e.OriginalSource is not FrameworkElement fe) return;
-        var item = fe.DataContext as LauncherItem;
-        if (item == null || item.IsGroup) return;
-
-        var lv = sender as ListView ?? ItemsListControl_GetAny();
-        var flyout = new MenuFlyout();
-        var editItem = new MenuFlyoutItem { Text = "Edit" };
-        editItem.Click += (_, _) => EditItem(item);
-        flyout.Items.Add(editItem);
-
-        if (lv != null)
-            flyout.ShowAt(lv, e.GetPosition(lv));
+        if (sender is ListView listView
+            && e.TryGetPosition(listView, out var point)
+            && TryGetContextMenuItem(listView, point, out var item))
+        {
+            ShowItemContextMenu(listView, item, point);
+            e.Handled = true;
+        }
     }
 
-    private ListView? ItemsListControl_GetAny()
+    private static bool TryGetContextMenuItem(ListView listView, global::Windows.Foundation.Point point, out LauncherItem item)
     {
-        return ColumnsPanel.Children.OfType<ListView>().FirstOrDefault();
+        for (int i = 0; i < listView.Items.Count; i++)
+        {
+            if (listView.ContainerFromIndex(i) is not ListViewItem container) continue;
+            if (listView.Items[i] is not LauncherItem candidate || candidate.IsGroup || candidate.IsColumnBreak) continue;
+
+            var origin = container.TransformToVisual(listView).TransformPoint(new global::Windows.Foundation.Point(0, 0));
+            var bounds = new global::Windows.Foundation.Rect(origin.X, origin.Y, container.ActualWidth, container.ActualHeight);
+            if (bounds.Contains(point))
+            {
+                item = candidate;
+                return true;
+            }
+        }
+
+        item = null!;
+        return false;
+    }
+
+    private void ShowItemContextMenu(FrameworkElement anchor, LauncherItem item, global::Windows.Foundation.Point? position = null)
+    {
+        if (IsReadOnlyLauncher || item.IsGroup || item.IsColumnBreak)
+            return;
+
+        var flyout = new MenuFlyout();
+
+        string moveBackwardText = IsIconMode ? "Move left" : "Move up";
+        string moveForwardText = IsIconMode ? "Move right" : "Move down";
+        string moveBackwardGlyph = IsIconMode ? "\uE76B" : "\uE70E";
+        string moveForwardGlyph = IsIconMode ? "\uE76C" : "\uE70D";
+
+        var moveUp = new MenuFlyoutItem { Text = moveBackwardText, Icon = new FontIcon { Glyph = moveBackwardGlyph } };
+        moveUp.Click += (_, _) =>
+        {
+            var parent = FindParentCollection(item);
+            if (parent == null) return;
+
+            int index = parent.IndexOf(item);
+            if (index <= 0) return;
+
+            parent.Move(index, index - 1);
+            PersistFlyoutItemChanges();
+        };
+        flyout.Items.Add(moveUp);
+
+        var moveDown = new MenuFlyoutItem { Text = moveForwardText, Icon = new FontIcon { Glyph = moveForwardGlyph } };
+        moveDown.Click += (_, _) =>
+        {
+            var parent = FindParentCollection(item);
+            if (parent == null) return;
+
+            int index = parent.IndexOf(item);
+            if (index < 0 || index >= parent.Count - 1) return;
+
+            parent.Move(index, index + 1);
+            PersistFlyoutItemChanges();
+        };
+        flyout.Items.Add(moveDown);
+
+        ObservableCollection<LauncherItem>? currentParent = null;
+        LauncherItem? currentGroup = null;
+        foreach (var group in _launcher.Items.Where(candidate => candidate.IsGroup))
+        {
+            if (group.Children.Contains(item))
+            {
+                currentParent = group.Children;
+                currentGroup = group;
+                break;
+            }
+        }
+
+        var moveToSub = new MenuFlyoutSubItem { Text = "Move to\u2026", Icon = new FontIcon { Glyph = "\uE8DE" } };
+
+        if (currentParent != null)
+        {
+            var topLevel = new MenuFlyoutItem { Text = "Top Level", Icon = new FontIcon { Glyph = "\uE74B" } };
+            topLevel.Click += (_, _) =>
+            {
+                currentParent.Remove(item);
+                _launcher.Items.Add(item);
+                PersistFlyoutItemChanges();
+            };
+            moveToSub.Items.Add(topLevel);
+        }
+
+        foreach (var group in _launcher.Items.Where(candidate => candidate.IsGroup))
+        {
+            if (group == currentGroup) continue;
+
+            var targetGroup = group;
+            var groupOption = new MenuFlyoutItem { Text = group.Name, Icon = new FontIcon { Glyph = "\uF168" } };
+            groupOption.Click += (_, _) =>
+            {
+                (currentParent ?? _launcher.Items).Remove(item);
+                targetGroup.Children.Add(item);
+                PersistFlyoutItemChanges();
+            };
+            moveToSub.Items.Add(groupOption);
+        }
+
+        var otherLaunchers = SettingsManager.Current.Launchers.Where(launcher => launcher != _launcher).ToList();
+        if (otherLaunchers.Count > 0)
+        {
+            if (moveToSub.Items.Count > 0)
+                moveToSub.Items.Add(new MenuFlyoutSeparator());
+
+            foreach (var launcher in otherLaunchers)
+            {
+                var targetLauncher = launcher;
+                var launcherOption = new MenuFlyoutItem
+                {
+                    Text = $"{targetLauncher.Name} (launcher)",
+                    Icon = new FontIcon { Glyph = "\uF0E2" }
+                };
+                launcherOption.Click += (_, _) =>
+                {
+                    (currentParent ?? _launcher.Items).Remove(item);
+                    targetLauncher.Items.Add(item);
+                    PersistFlyoutItemChanges(targetLauncher);
+                };
+                moveToSub.Items.Add(launcherOption);
+            }
+        }
+
+        if (moveToSub.Items.Count > 0)
+        {
+            flyout.Items.Add(new MenuFlyoutSeparator());
+            flyout.Items.Add(moveToSub);
+        }
+
+        flyout.Items.Add(new MenuFlyoutSeparator());
+
+        var edit = new MenuFlyoutItem { Text = "Edit", Icon = new FontIcon { Glyph = "\uE70F" } };
+        edit.Click += (_, _) => EditItem(item);
+        flyout.Items.Add(edit);
+
+        var remove = new MenuFlyoutItem { Text = "Remove", Icon = new FontIcon { Glyph = "\uE74D" } };
+        remove.Click += (_, _) =>
+        {
+            var parent = FindParentCollection(item);
+            parent?.Remove(item);
+            PersistFlyoutItemChanges();
+        };
+        flyout.Items.Add(remove);
+
+        AppendLegacyContextMenuItems(flyout);
+
+        if (position is global::Windows.Foundation.Point point)
+            flyout.ShowAt(anchor, point);
+        else
+            flyout.ShowAt(anchor);
+    }
+
+    private ObservableCollection<LauncherItem>? FindParentCollection(LauncherItem item)
+    {
+        if (_launcher.Items.Contains(item))
+            return _launcher.Items;
+
+        foreach (var group in _launcher.Items.Where(candidate => candidate.IsGroup))
+        {
+            if (group.Children.Contains(item))
+                return group.Children;
+        }
+
+        return null;
+    }
+
+    private void PersistFlyoutItemChanges(params Launcher[] additionalLaunchers)
+    {
+        SettingsManager.SaveSettings();
+        AutoSyncService.NotifyItemsChanged();
+
+        var seenIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var launcher in new[] { _launcher }.Concat(additionalLaunchers))
+        {
+            if (string.IsNullOrEmpty(launcher.Id) || !seenIds.Add(launcher.Id))
+                continue;
+
+            LauncherItemsPage.NotifyItemsChanged(launcher.Id);
+            InvalidateItems(launcher.Id);
+
+            if (_instances.TryGetValue(launcher.Id, out var flyout))
+                flyout.UpdateFlyoutLayoutInPlace();
+        }
+    }
+
+    private void AppendLegacyContextMenuItems(MenuFlyout flyout)
+    {
+        flyout.Items.Add(new MenuFlyoutSeparator());
+
+        var editLauncherSettings = new MenuFlyoutItem
+        {
+            Text = "Edit Launcher Settings",
+            Icon = new FontIcon { Glyph = "\uE713" }
+        };
+        editLauncherSettings.Click += ContextEditLauncherSettings_Click;
+        flyout.Items.Add(editLauncherSettings);
+
+        var editLauncherItems = new MenuFlyoutItem
+        {
+            Text = "Edit Launcher Items",
+            Icon = new FontIcon { Glyph = "\uE70F" }
+        };
+        editLauncherItems.Click += ContextEditLauncherItems_Click;
+        flyout.Items.Add(editLauncherItems);
+
+        flyout.Items.Add(new MenuFlyoutSeparator());
+
+        var settingsItem = new MenuFlyoutItem
+        {
+            Text = "App Settings",
+            Icon = new FontIcon { Glyph = "\uE713" }
+        };
+        settingsItem.Click += ContextSettingsItem_Click;
+        flyout.Items.Add(settingsItem);
     }
 
     private static void LaunchWebsite(LauncherItem item)

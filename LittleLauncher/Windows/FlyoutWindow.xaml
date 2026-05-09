@@ -67,7 +67,7 @@
                               ItemTemplate="{StaticResource LauncherItemTemplate}"
                               ItemContainerStyle="{StaticResource LauncherItemContainerStyle}"
                               ItemClick="ItemsListControl_ItemClick"
-                              RightTapped="ItemsListControl_RightTapped"
+                              ContextRequested="ItemsListControl_ContextRequested"
                               DragItemsStarting="GroupChildList_DragItemsStarting"
                               DragOver="GroupChildList_DragOver"
                               DragLeave="GroupChildList_DragLeave"
@@ -395,7 +395,7 @@
                               ItemTemplate="{StaticResource IconItemTemplate}"
                               ItemContainerStyle="{StaticResource IconItemContainerStyle}"
                               ItemClick="ItemsListControl_ItemClick"
-                              RightTapped="ItemsListControl_RightTapped"
+                              ContextRequested="ItemsListControl_ContextRequested"
                               DragItemsStarting="GroupChildList_DragItemsStarting"
                               DragOver="GroupChildList_DragOver"
                               DragLeave="GroupChildList_DragLeave"
@@ -424,7 +424,7 @@
                           ItemTemplate="{StaticResource IconItemTemplate}"
                           ItemContainerStyle="{StaticResource IconItemContainerStyle}"
                           ItemClick="ItemsListControl_ItemClick"
-                          RightTapped="ItemsListControl_RightTapped"
+                          ContextRequested="ItemsListControl_ContextRequested"
                           DragItemsStarting="GroupChildList_DragItemsStarting"
                           DragOver="GroupChildList_DragOver"
                           DragLeave="GroupChildList_DragLeave"
@@ -474,7 +474,7 @@
                               ItemTemplate="{StaticResource SmallIconItemTemplate}"
                               ItemContainerStyle="{StaticResource IconItemContainerStyle}"
                               ItemClick="ItemsListControl_ItemClick"
-                              RightTapped="ItemsListControl_RightTapped"
+                              ContextRequested="ItemsListControl_ContextRequested"
                               DragItemsStarting="GroupChildList_DragItemsStarting"
                               DragOver="GroupChildList_DragOver"
                               DragLeave="GroupChildList_DragLeave"
@@ -503,7 +503,7 @@
                           ItemTemplate="{StaticResource SmallIconItemTemplate}"
                           ItemContainerStyle="{StaticResource IconItemContainerStyle}"
                           ItemClick="ItemsListControl_ItemClick"
-                          RightTapped="ItemsListControl_RightTapped"
+                          ContextRequested="ItemsListControl_ContextRequested"
                           DragItemsStarting="GroupChildList_DragItemsStarting"
                           DragOver="GroupChildList_DragOver"
                           DragLeave="GroupChildList_DragLeave"
@@ -530,7 +530,8 @@
                         <FontIcon Glyph="&#xE70F;" />
                     </MenuFlyoutItem.Icon>
                 </MenuFlyoutItem>
-                <MenuFlyoutItem x:Name="ContextSettingsItem" Text="Settings" Click="ContextSettingsItem_Click">
+                <MenuFlyoutSeparator />
+                <MenuFlyoutItem x:Name="ContextSettingsItem" Text="App Settings" Click="ContextSettingsItem_Click">
                     <MenuFlyoutItem.Icon>
                         <FontIcon Glyph="&#xE713;" />
                     </MenuFlyoutItem.Icon>
