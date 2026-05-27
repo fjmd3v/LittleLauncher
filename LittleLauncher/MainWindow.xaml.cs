@@ -68,6 +68,12 @@ public sealed partial class MainWindow : Window
             "Programs");
     }
 
+    internal static string GetLegacySharedStartMenuProgramsDir()
+    {
+        string userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        return Path.Combine(userProfile, "AppData", "Roaming", "Microsoft", "Windows", "Start Menu", "Programs");
+    }
+
     /// <summary>
     /// Returns the physical (non-VFS) path for the app's data directory.
     /// In MSIX, writes to %AppData%\LittleLauncher are VFS-redirected to a
@@ -86,6 +92,17 @@ public sealed partial class MainWindow : Window
         return Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
             "LittleLauncher");
+    }
+
+    /// <summary>
+    /// Returns the real, shared %AppData% path used by unpackaged builds.
+    /// In packaged builds this bypasses MSIX redirection so we can keep old
+    /// unpackaged launcher pins pointing at a current companion exe.
+    /// </summary>
+    internal static string GetLegacySharedAppDataDir()
+    {
+        string userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        return Path.Combine(userProfile, "AppData", "Roaming", "LittleLauncher");
     }
 
 
@@ -1252,6 +1269,12 @@ public sealed partial class MainWindow : Window
     {
         try
         {
+            if (IsPackaged)
+            {
+                RemoveStartupRegistryEntry();
+                return;
+            }
+
             using var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(
                 @"SOFTWARE\Microsoft\Windows\CurrentVersion\Run", true);
             if (key == null) return;
@@ -1266,6 +1289,18 @@ public sealed partial class MainWindow : Window
             }
         }
         catch { /* best-effort migration */ }
+    }
+
+    internal static void RemoveStartupRegistryEntry()
+    {
+        try
+        {
+            using var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(
+                @"SOFTWARE\Microsoft\Windows\CurrentVersion\Run", true);
+            if (key?.GetValue("Little Launcher") != null)
+                key.DeleteValue("Little Launcher", false);
+        }
+        catch { /* best-effort cleanup */ }
     }
 
     private bool TryResolveLauncherAnchorPoint(string launcherId, int fallbackX, int fallbackY, out int anchorX, out int anchorY)
@@ -1481,9 +1516,16 @@ public sealed partial class MainWindow : Window
     /// </summary>
     private static void CleanUpStaleFlyoutShortcuts()
     {
+        CleanUpStaleFlyoutShortcuts(GetStartMenuProgramsDir());
+
+        if (IsPackaged)
+            CleanUpStaleFlyoutShortcuts(GetLegacySharedStartMenuProgramsDir());
+    }
+
+    private static void CleanUpStaleFlyoutShortcuts(string startMenuDir)
+    {
         try
         {
-            string startMenuDir = GetStartMenuProgramsDir();
             if (!Directory.Exists(startMenuDir)) return;
             foreach (var pattern in new[] { "Little Launcher - *.lnk", "Little Launcher Flyout - *.lnk", "Little Launcher Flyout.lnk" })
             {
@@ -1504,8 +1546,13 @@ public sealed partial class MainWindow : Window
         CleanUpStaleFlyoutShortcuts();
 
         // MSIX packages register their own Start Menu entry via the manifest.
-        // Creating a .lnk would duplicate it.
-        if (IsPackaged) return;
+        // Remove any stale unpackaged shortcut so Windows only sees the
+        // packaged entry, then stop before creating a duplicate .lnk.
+        if (IsPackaged)
+        {
+            CleanUpLegacyUnpackagedMainShortcut();
+            return;
+        }
 
         try
         {
@@ -1548,46 +1595,71 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    private static void CleanUpLegacyUnpackagedMainShortcut()
+    {
+        try
+        {
+            string startMenuDir = GetLegacySharedStartMenuProgramsDir();
+            if (!Directory.Exists(startMenuDir)) return;
+
+            foreach (string shortcutName in new[] { "Little Launcher.lnk", "LittleLauncher.lnk", "LittleLauncher Settings.lnk" })
+            {
+                string shortcutPath = Path.Combine(startMenuDir, shortcutName);
+                if (File.Exists(shortcutPath))
+                    File.Delete(shortcutPath);
+            }
+
+            string msiSubfolder = Path.Combine(startMenuDir, "Little Launcher");
+            if (Directory.Exists(msiSubfolder))
+            {
+                try { Directory.Delete(msiSubfolder, true); }
+                catch { /* best-effort */ }
+            }
+        }
+        catch { /* best-effort */ }
+    }
+
     /// <summary>
     /// Copies the companion flyout exe to %AppData%\LittleLauncher\ so it has
     /// a consistent, non-packaged location for all build types (WiX, MSIX,
-    /// unpackaged). Also writes a main-exe-path.txt breadcrumb and cleans up
-    /// legacy Start Menu shortcuts from previous versions.
+    /// unpackaged). In packaged builds, also mirrors the helper into the legacy
+    /// shared Roaming path so old unpackaged launcher pins stop cold-starting a
+    /// stale debug/WiX build. Also writes a main-exe-path.txt breadcrumb and
+    /// cleans up legacy Start Menu shortcuts from previous versions.
     /// </summary>
     private static void EnsureFlyoutShortcut()
     {
         try
         {
-            string appDataDir = GetPhysicalAppDataDir();
-            Directory.CreateDirectory(appDataDir);
-
             // Source: the companion exe next to the main exe
             string sourceExe = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "LittleLauncherFlyout.exe");
             if (!File.Exists(sourceExe))
                 return;
-
-            // Destination: %AppData%\LittleLauncher\LittleLauncherFlyout.exe
-            string destExe = Path.Combine(appDataDir, "LittleLauncherFlyout.exe");
-
-            // Always overwrite so the companion exe stays current after updates
-            File.Copy(sourceExe, destExe, overwrite: true);
-
-            // In debug (framework-dependent) builds, the companion exe also
-            // needs its .dll, .deps.json, and .runtimeconfig.json to run.
-            // Release builds are Native AOT single-file and don't need these.
-            string baseDir = AppDomain.CurrentDomain.BaseDirectory;
-            foreach (var ext in new[] { ".dll", ".deps.json", ".runtimeconfig.json" })
-            {
-                string src = Path.Combine(baseDir, "LittleLauncherFlyout" + ext);
-                if (File.Exists(src))
-                    File.Copy(src, Path.Combine(appDataDir, "LittleLauncherFlyout" + ext), overwrite: true);
-            }
-
-            // Write a breadcrumb so the companion exe can launch the main app
-            // if it isn't running (FindWindow returns null).
             string mainExePath = Environment.ProcessPath ?? "";
-            if (!string.IsNullOrEmpty(mainExePath))
-                File.WriteAllText(Path.Combine(appDataDir, "main-exe-path.txt"), mainExePath);
+            string baseDir = AppDomain.CurrentDomain.BaseDirectory;
+
+            foreach (string targetDir in GetFlyoutCompanionTargetDirs())
+            {
+                Directory.CreateDirectory(targetDir);
+
+                string destExe = Path.Combine(targetDir, "LittleLauncherFlyout.exe");
+                File.Copy(sourceExe, destExe, overwrite: true);
+
+                // In debug (framework-dependent) builds, the companion exe also
+                // needs its .dll, .deps.json, and .runtimeconfig.json to run.
+                // Release builds are Native AOT single-file and don't need these.
+                foreach (var ext in new[] { ".dll", ".deps.json", ".runtimeconfig.json" })
+                {
+                    string src = Path.Combine(baseDir, "LittleLauncherFlyout" + ext);
+                    if (File.Exists(src))
+                        File.Copy(src, Path.Combine(targetDir, "LittleLauncherFlyout" + ext), overwrite: true);
+                }
+
+                // Write a breadcrumb so the companion exe can launch the main app
+                // if it isn't running (FindWindow returns null).
+                if (!string.IsNullOrEmpty(mainExePath))
+                    File.WriteAllText(Path.Combine(targetDir, "main-exe-path.txt"), mainExePath);
+            }
 
             // Remove the old Start Menu shortcut (no longer created — the
             // pin-to-taskbar button in Settings handles pinning directly).
@@ -1600,6 +1672,18 @@ public sealed partial class MainWindow : Window
         catch (Exception ex)
         {
             Logger.Warn(ex, "Failed to create flyout shortcut");
+        }
+    }
+
+    private static IEnumerable<string> GetFlyoutCompanionTargetDirs()
+    {
+        yield return GetPhysicalAppDataDir();
+
+        if (IsPackaged)
+        {
+            string legacyDir = GetLegacySharedAppDataDir();
+            if (!string.Equals(legacyDir, GetPhysicalAppDataDir(), StringComparison.OrdinalIgnoreCase))
+                yield return legacyDir;
         }
     }
 

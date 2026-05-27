@@ -5,6 +5,7 @@ using Microsoft.UI.Xaml.Controls;
 using System.Collections.Generic;
 using System.IO;
 using System.Threading.Tasks;
+using global::Windows.ApplicationModel;
 using global::Windows.Storage.Pickers;
 using WinRT.Interop;
 
@@ -13,44 +14,130 @@ namespace LittleLauncher.Pages;
 public partial class SystemPage : Page
 {
     private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
+    private const string StartupTaskId = "LittleLauncherStartup";
+    private bool _startupStateInitialized;
+    private bool _updatingStartupSwitch;
 
     public SystemPage()
     {
         InitializeComponent();
         DataContext = SettingsManager.Current;
+        _ = RefreshStartupStateAsync();
     }
 
-    private void StartupSwitch_Toggled(object sender, RoutedEventArgs e)
+    private async void StartupSwitch_Toggled(object sender, RoutedEventArgs e)
     {
-        SetStartup(StartupSwitch.IsOn);
+        if (_updatingStartupSwitch || !_startupStateInitialized)
+            return;
+
+        await SetStartupAsync(StartupSwitch.IsOn);
     }
 
-    private void SetStartup(bool enable)
+    private async Task RefreshStartupStateAsync()
     {
         try
         {
-            using var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(
-                @"SOFTWARE\Microsoft\Windows\CurrentVersion\Run", true);
-            if (key == null) return;
-            const string appName = "Little Launcher";
-            var executablePath = Environment.ProcessPath;
+            bool isEnabled = await IsStartupEnabledAsync();
+            ApplyStartupSwitchState(isEnabled);
+        }
+        catch (Exception ex)
+        {
+            Logger.Error(ex, "Failed to read startup state");
+        }
+        finally
+        {
+            _startupStateInitialized = true;
+        }
+    }
 
-            if (enable)
+    private async Task SetStartupAsync(bool enable)
+    {
+        try
+        {
+            bool isEnabled;
+            if (MainWindow.IsPackaged)
             {
-                if (File.Exists(executablePath))
-                    key.SetValue(appName, $"\"{executablePath}\" --silent");
-                else
-                    throw new FileNotFoundException("Application executable not found.");
+                isEnabled = await SetPackagedStartupAsync(enable);
+                MainWindow.RemoveStartupRegistryEntry();
             }
             else
             {
-                if (key.GetValue(appName) != null)
-                    key.DeleteValue(appName, false);
+                SetUnpackagedStartup(enable);
+                isEnabled = await IsStartupEnabledAsync();
             }
+
+            ApplyStartupSwitchState(isEnabled);
         }
         catch (Exception ex)
         {
             Logger.Error(ex, "Failed to set startup");
+            ApplyStartupSwitchState(await IsStartupEnabledAsync());
+        }
+    }
+
+    private void ApplyStartupSwitchState(bool isEnabled)
+    {
+        try
+        {
+            _updatingStartupSwitch = true;
+            StartupSwitch.IsOn = isEnabled;
+            SettingsManager.Current.Startup = isEnabled;
+        }
+        finally
+        {
+            _updatingStartupSwitch = false;
+        }
+    }
+
+    private static async Task<bool> IsStartupEnabledAsync()
+    {
+        if (MainWindow.IsPackaged)
+        {
+            var startupTask = await StartupTask.GetAsync(StartupTaskId);
+            return startupTask.State is StartupTaskState.Enabled or StartupTaskState.EnabledByPolicy;
+        }
+
+        using var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(
+            @"SOFTWARE\Microsoft\Windows\CurrentVersion\Run", false);
+        return key?.GetValue("Little Launcher") is string currentValue && !string.IsNullOrWhiteSpace(currentValue);
+    }
+
+    private static async Task<bool> SetPackagedStartupAsync(bool enable)
+    {
+        var startupTask = await StartupTask.GetAsync(StartupTaskId);
+
+        if (!enable)
+        {
+            startupTask.Disable();
+            return false;
+        }
+
+        if (startupTask.State is StartupTaskState.Enabled or StartupTaskState.EnabledByPolicy)
+            return true;
+
+        StartupTaskState result = await startupTask.RequestEnableAsync();
+        return result is StartupTaskState.Enabled or StartupTaskState.EnabledByPolicy;
+    }
+
+    private static void SetUnpackagedStartup(bool enable)
+    {
+        using var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(
+            @"SOFTWARE\Microsoft\Windows\CurrentVersion\Run", true);
+        if (key == null) return;
+
+        const string appName = "Little Launcher";
+        string executablePath = Environment.ProcessPath ?? string.Empty;
+
+        if (enable)
+        {
+            if (File.Exists(executablePath))
+                key.SetValue(appName, $"\"{executablePath}\" --silent");
+            else
+                throw new FileNotFoundException("Application executable not found.");
+        }
+        else if (key.GetValue(appName) != null)
+        {
+            key.DeleteValue(appName, false);
         }
     }
 

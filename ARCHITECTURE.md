@@ -31,6 +31,8 @@ By default, launching the app opens the Settings window. Silent mode (tray icon 
 | Companion exe cold-start | `LittleLauncher.exe --silent` | No |
 | Second instance (app already running) | Signals first instance via `PostMessage` → shows Settings | Yes |
 
+`SystemPage` manages startup through the install-type-specific mechanism: unpackaged builds write the HKCU Run key, packaged builds use the manifest `StartupTask`, and packaged startup cleanup removes any stale unpackaged Run entry so the Store app wins after install-type switches.
+
 ## Settings persistence
 
 - `UserSettings` (the ViewModel) is an `ObservableObject` with `[ObservableProperty]` attributes.
@@ -116,7 +118,7 @@ For pinned taskbar launches, `MainWindow` now tries to resolve the actual taskba
 
 ### Companion exe deployment
 
-At startup, `EnsureFlyoutShortcut()` copies the companion exe to `%AppData%\\LittleLauncher\\` and creates a Start Menu shortcut pointing to that copy. This is done for **all** build types (WiX, MSIX, unpackaged) so there is a single, consistent location for pinning. A `main-exe-path.txt` breadcrumb file is written alongside the companion exe so it can launch the main app with `--silent` if `FindWindow` fails (main app not running).
+At startup, `EnsureFlyoutShortcut()` copies the companion exe to the external helper directory returned by `GetPhysicalAppDataDir()` and writes a `main-exe-path.txt` breadcrumb alongside it so the helper can launch the main app with `--silent` if `FindWindow` fails. In packaged builds it also mirrors the helper into the real shared `%AppData%\\LittleLauncher\\` path so old unpackaged launcher pins stop cold-starting stale debug/WiX builds after an install-type switch. No Start Menu flyout shortcut is created anymore.
 
 ## MSIX packaging
 
@@ -127,6 +129,6 @@ At startup, `EnsureFlyoutShortcut()` copies the companion exe to `%AppData%\\Lit
 - **Copies compiled XAML (.xbf)** files manually from the RID build directory to the layout — `dotnet publish` omits them.
 - **Version and architecture** are stamped from `Directory.Build.props` into the manifest at build time (`VERSION_PLACEHOLDER`, `ARCH_PLACEHOLDER`).
 - **Image assets** in `LittleLauncherMSIX/Images/` use standard MRT naming qualifiers (e.g. `.scale-200.`, `.targetsize-48.`) and are indexed into `resources.pri` by `makepri`.
-- **Companion exe** is deployed to `%AppData%\\LittleLauncher\\` at startup for all build types. See \"Companion exe\" section above.
+- **Companion exe** is deployed at startup to the external helper directory, and packaged builds also mirror it into the shared raw `%AppData%\\LittleLauncher\\` path for backward compatibility with old launcher pins. See "Companion exe" section above.
 - **`-NoSign` flag** skips all signing for Store uploads (Microsoft re-signs during ingestion). Without `-NoSign`, the script signs with a self-signed dev cert or a trusted PFX.
 - **Update checks and toast notifications** are disabled in MSIX builds — the Store handles updates. The GitHub-based update UI on Home/About pages is hidden.
