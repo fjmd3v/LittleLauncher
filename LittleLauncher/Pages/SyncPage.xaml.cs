@@ -165,6 +165,8 @@ public partial class SyncPage : Page
     {
         ShowStatus("Uploading launchers...", InfoBarSeverity.Informational);
         var (success, message) = await SftpSyncService.UploadLaunchersAsync(password);
+        if (success)
+            AutoSyncService.ClearPendingLocalItemChanges();
         ShowStatus(message, success ? InfoBarSeverity.Success : InfoBarSeverity.Error);
     }
 
@@ -176,6 +178,7 @@ public partial class SyncPage : Page
 
         if (success)
         {
+            AutoSyncService.ClearPendingLocalItemChanges();
             FlyoutWindow.InvalidateItems();
             MainWindow.Current?.RefreshTrayIcons();
         }

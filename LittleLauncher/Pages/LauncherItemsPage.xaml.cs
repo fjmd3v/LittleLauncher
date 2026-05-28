@@ -1,5 +1,6 @@
 using LittleLauncher.Classes;
 using LittleLauncher.Classes.Settings;
+using LittleLauncher.Controls;
 using LittleLauncher.Models;
 using LittleLauncher.Services;
 using LittleLauncher.Windows;
@@ -30,6 +31,16 @@ public class LauncherItemTemplateSelector : DataTemplateSelector
     public HashSet<LauncherItem>? SyntheticGroups { get; set; }
 
     protected override DataTemplate? SelectTemplateCore(object item)
+    {
+        return SelectTemplateForItem(item);
+    }
+
+    protected override DataTemplate? SelectTemplateCore(object item, DependencyObject container)
+    {
+        return SelectTemplateForItem(item);
+    }
+
+    private DataTemplate? SelectTemplateForItem(object item)
     {
         if (item is LauncherItem li)
         {
@@ -63,8 +74,8 @@ public partial class LauncherItemsPage : Page
     // -- Cross-list drag-and-drop tracking --
     private LauncherItem? _dragItem;
     private ObservableCollection<LauncherItem>? _dragSourceCollection;
-    private ListViewItem? _lastIndicatorContainer;
-    private ListView? _lastIndicatorListView;
+    private Control? _lastIndicatorContainer;
+    private ListViewBase? _lastIndicatorListView;
     private bool _isReadOnly;
     private readonly List<Border> _newColumnDropZones = [];
 
@@ -74,6 +85,7 @@ public partial class LauncherItemsPage : Page
     private const int ListModeColumnWidth = 280;
     private const int DefaultIconModeColumnWidth = 265;
     private const int IconModeTileOuterWidth = 84;
+    private const int IconModeTileOuterHeight = 86;
     private const int IconModeColumnChromeWidth = DefaultIconModeColumnWidth - (IconModeTileOuterWidth * Launcher.DefaultIconModeIconsPerRow);
 
     // -- Cached resources (created once, reused on every pointer/drag event) --
@@ -95,6 +107,32 @@ public partial class LauncherItemsPage : Page
         Launcher.ClampIconModeIconsPerRow(TargetLauncher?.IconModeIconsPerRow ?? Launcher.DefaultIconModeIconsPerRow);
 
     private static int GetIconModeColumnWidth() => IconModeColumnChromeWidth + (GetIconModeIconsPerRow() * IconModeTileOuterWidth);
+
+    private static int GetIconModeGroupContentWidth(LauncherItem group)
+    {
+        int visibleIcons = Math.Clamp(group.Children.Count, 1, GetIconModeIconsPerRow());
+        return visibleIcons * IconModeTileOuterWidth;
+    }
+
+    private static int GetIconModeTopLevelSpan(LauncherItem item)
+    {
+        if (!item.IsGroup)
+            return 1;
+
+        return Math.Clamp(item.Children.Count, 1, GetIconModeIconsPerRow());
+    }
+
+    private int GetIconModeTopLevelRowSpan(LauncherItem item)
+    {
+        if (!item.IsGroup)
+            return 1;
+
+        int childRows = Math.Max(1, (item.Children.Count + GetIconModeIconsPerRow() - 1) / GetIconModeIconsPerRow());
+        return _syntheticGroups.Contains(item) ? childRows : childRows + 1;
+    }
+
+    private static bool IsGridItemsPanel(Panel? panel) =>
+        panel is ItemsWrapGrid or PackedIconPanel;
 
     public LauncherItemsPage()
     {
@@ -229,13 +267,14 @@ public partial class LauncherItemsPage : Page
             }
 
             // ListView for this column
-            var lv = new ListView
-            {
-                CanDragItems = !_isReadOnly,
-                AllowDrop = !_isReadOnly,
-                SelectionMode = ListViewSelectionMode.None,
-                Tag = colIdx
-            };
+            ListViewBase lv = isIconMode
+                ? new GridView()
+                : new ListView();
+
+            lv.CanDragItems = !_isReadOnly;
+            lv.AllowDrop = !_isReadOnly;
+            lv.SelectionMode = ListViewSelectionMode.None;
+            lv.Tag = colIdx;
             if (isIconMode)
             {
                 var baseSelector = (LauncherItemTemplateSelector)Resources["IconModeTemplateSelector"];
@@ -246,7 +285,10 @@ public partial class LauncherItemsPage : Page
                     SyntheticGroupTemplate = (DataTemplate)Resources["IconModeSyntheticGroupTemplate"],
                     SyntheticGroups = _syntheticGroups,
                 };
-                lv.ItemContainerStyle = CreateIconModeContainerStyle();
+                lv.ItemContainerStyle = CreateIconModeGridContainerStyle();
+                lv.ItemsPanel = CreateTopLevelIconModeItemsPanel();
+                lv.Loaded += IconModeColumnList_Loaded;
+                lv.ContainerContentChanging += IconModeColumn_ContainerContentChanging;
             }
             else
             {
@@ -321,7 +363,20 @@ public partial class LauncherItemsPage : Page
         style.Setters.Add(new Setter(ListViewItem.MarginProperty, new Thickness(0)));
         style.Setters.Add(new Setter(ListViewItem.MinWidthProperty, 0.0));
         style.Setters.Add(new Setter(ListViewItem.MinHeightProperty, 0.0));
-        style.Setters.Add(new Setter(ListViewItem.HorizontalContentAlignmentProperty, HorizontalAlignment.Stretch));
+        style.Setters.Add(new Setter(ListViewItem.HorizontalAlignmentProperty, HorizontalAlignment.Left));
+        style.Setters.Add(new Setter(ListViewItem.HorizontalContentAlignmentProperty, HorizontalAlignment.Left));
+        return style;
+    }
+
+    private static Style CreateIconModeGridContainerStyle()
+    {
+        var style = new Style(typeof(GridViewItem));
+        style.Setters.Add(new Setter(GridViewItem.PaddingProperty, new Thickness(0)));
+        style.Setters.Add(new Setter(GridViewItem.MarginProperty, new Thickness(0)));
+        style.Setters.Add(new Setter(GridViewItem.MinWidthProperty, 0.0));
+        style.Setters.Add(new Setter(GridViewItem.MinHeightProperty, 0.0));
+        style.Setters.Add(new Setter(GridViewItem.HorizontalAlignmentProperty, HorizontalAlignment.Stretch));
+        style.Setters.Add(new Setter(GridViewItem.HorizontalContentAlignmentProperty, HorizontalAlignment.Stretch));
         return style;
     }
 
@@ -338,10 +393,109 @@ public partial class LauncherItemsPage : Page
         return (ItemsPanelTemplate)Microsoft.UI.Xaml.Markup.XamlReader.Load(xaml);
     }
 
+    private ItemsPanelTemplate CreateTopLevelIconModeItemsPanel()
+    {
+        return (ItemsPanelTemplate)Resources["TopLevelIconModeItemsPanel"];
+    }
+
     private void IconModeWrapList_Loaded(object sender, RoutedEventArgs e)
     {
-        if (sender is ListView listView)
-            listView.ItemsPanel = CreateWrapGridItemsPanel();
+        if (sender is not ListView listView)
+            return;
+
+        listView.ItemsPanel = CreateWrapGridItemsPanel();
+        ApplyIconModeGroupListLayout(listView);
+
+        if (listView.Tag is LauncherItem group && _syntheticGroups.Contains(group))
+        {
+            VariableSizedWrapGrid.SetColumnSpan(listView, GetIconModeTopLevelSpan(group));
+            VariableSizedWrapGrid.SetRowSpan(listView, GetIconModeTopLevelRowSpan(group));
+        }
+    }
+
+    private void IconModeColumnList_Loaded(object sender, RoutedEventArgs e)
+    {
+        if (sender is not ListViewBase listView)
+            return;
+
+        ApplyTopLevelIconModeSpans(listView);
+    }
+
+    private void IconModeColumn_ContainerContentChanging(ListViewBase sender, ContainerContentChangingEventArgs args)
+    {
+        if (args.InRecycleQueue || args.Item is not LauncherItem item || args.ItemContainer is not Control container)
+            return;
+
+        if (sender.ItemsPanelRoot is PackedIconPanel wrapGrid)
+        {
+            wrapGrid.MaximumRowsOrColumns = GetIconModeIconsPerRow();
+            wrapGrid.ItemWidth = IconModeTileOuterWidth;
+            wrapGrid.ItemHeight = IconModeTileOuterHeight;
+            wrapGrid.InvalidateMeasure();
+        }
+
+        VariableSizedWrapGrid.SetColumnSpan(container, GetIconModeTopLevelSpan(item));
+        VariableSizedWrapGrid.SetRowSpan(container, GetIconModeTopLevelRowSpan(item));
+    }
+
+    private static void ApplyIconModeGroupListLayout(ListView listView)
+    {
+        if (listView.Tag is not LauncherItem group)
+            return;
+
+        listView.Width = GetIconModeGroupContentWidth(group);
+        listView.MaxWidth = GetIconModeIconsPerRow() * IconModeTileOuterWidth;
+        listView.HorizontalAlignment = HorizontalAlignment.Center;
+    }
+
+    private static void ApplyIconModeGroupCardLayout(Border border)
+    {
+        if (!LauncherViewModes.IsIconMode(TargetLauncher?.ViewMode ?? LauncherViewModes.Icon)
+            || border.DataContext is not LauncherItem group
+            || !group.IsGroup)
+        {
+            return;
+        }
+
+        border.Width = GetIconModeGroupContentWidth(group);
+        border.MaxWidth = GetIconModeColumnWidth();
+        border.HorizontalAlignment = HorizontalAlignment.Center;
+        VariableSizedWrapGrid.SetColumnSpan(border, GetIconModeTopLevelSpan(group));
+        int childRows = Math.Max(1, (group.Children.Count + GetIconModeIconsPerRow() - 1) / GetIconModeIconsPerRow());
+        VariableSizedWrapGrid.SetRowSpan(border, childRows + 1);
+    }
+
+    private void ApplyTopLevelIconModeSpans(ListViewBase listView)
+    {
+        if (listView.ItemsPanelRoot is not PackedIconPanel wrapGrid)
+            return;
+
+        wrapGrid.MaximumRowsOrColumns = GetIconModeIconsPerRow();
+        wrapGrid.ItemWidth = IconModeTileOuterWidth;
+        wrapGrid.ItemHeight = IconModeTileOuterHeight;
+
+        listView.UpdateLayout();
+
+        for (int index = 0; index < listView.Items.Count; index++)
+        {
+            if (listView.Items[index] is not LauncherItem item || listView.ContainerFromIndex(index) is not Control container)
+                continue;
+
+            int columnSpan = GetIconModeTopLevelSpan(item);
+            int rowSpan = GetIconModeTopLevelRowSpan(item);
+            VariableSizedWrapGrid.SetColumnSpan(container, columnSpan);
+            VariableSizedWrapGrid.SetRowSpan(container, rowSpan);
+
+            if (index < wrapGrid.Children.Count && wrapGrid.Children[index] is UIElement panelChild)
+            {
+                VariableSizedWrapGrid.SetColumnSpan(panelChild, columnSpan);
+                VariableSizedWrapGrid.SetRowSpan(panelChild, rowSpan);
+            }
+        }
+
+        wrapGrid.InvalidateMeasure();
+        wrapGrid.InvalidateArrange();
+        listView.UpdateLayout();
     }
 
     /// <summary>
@@ -450,7 +604,7 @@ public partial class LauncherItemsPage : Page
 
     private void ColumnListView_DragItemsStarting(object sender, DragItemsStartingEventArgs e)
     {
-        if (sender is ListView lv && lv.Tag is int colIdx
+        if (sender is ListViewBase lv && lv.Tag is int colIdx
             && e.Items.FirstOrDefault() is LauncherItem item)
         {
             _dragItem = item;
@@ -463,7 +617,7 @@ public partial class LauncherItemsPage : Page
     private void ColumnListView_DragOver(object sender, DragEventArgs e)
     {
         if (_dragItem == null || _dragSourceCollection == null) return;
-        if (sender is not ListView lv || lv.Tag is not int colIdx) return;
+        if (sender is not ListViewBase lv || lv.Tag is not int colIdx) return;
 
         e.AcceptedOperation = global::Windows.ApplicationModel.DataTransfer.DataPackageOperation.Move;
 
@@ -476,7 +630,7 @@ public partial class LauncherItemsPage : Page
         if (dropIndex < targetCol.Count)
         {
             var targetItem = targetCol[dropIndex];
-            bool isGrid = lv.ItemsPanelRoot is ItemsWrapGrid;
+            bool isGrid = IsGridItemsPanel(lv.ItemsPanelRoot);
             e.DragUIOverride.Caption = isGrid
                 ? $"Move before {targetItem.Name}"
                 : $"Move above {targetItem.Name}";
@@ -499,7 +653,7 @@ public partial class LauncherItemsPage : Page
         ClearInsertionIndicator();
         HideNewColumnDropZones();
         if (_dragItem == null || _dragSourceCollection == null) return;
-        if (sender is not ListView lv || lv.Tag is not int colIdx) return;
+        if (sender is not ListViewBase lv || lv.Tag is not int colIdx) return;
 
         var targetCol = _columnLists[colIdx];
         int dropIndex = GetDropIndex(lv, e);
@@ -592,6 +746,8 @@ public partial class LauncherItemsPage : Page
     private void ItemCard_Loaded(object sender, RoutedEventArgs e)
     {
         if (sender is not Border border || border.Child is not Panel panel) return;
+
+        ApplyIconModeGroupCardLayout(border);
 
         // For regular items, child is a Grid.
         // For groups, child is a StackPanel (GroupRoot) whose first child is the header Grid.
@@ -1132,7 +1288,7 @@ public partial class LauncherItemsPage : Page
         e.DragUIOverride.IsGlyphVisible = true;
         if (dropIndex < group.Children.Count)
         {
-            bool isGrid = lv.ItemsPanelRoot is ItemsWrapGrid;
+            bool isGrid = IsGridItemsPanel(lv.ItemsPanelRoot);
             e.DragUIOverride.Caption = isGrid
                 ? $"Move before {group.Children[dropIndex].Name}"
                 : $"Move above {group.Children[dropIndex].Name}";
@@ -1330,7 +1486,7 @@ public partial class LauncherItemsPage : Page
 
     // -- Insertion indicator helpers --
 
-    private void ShowInsertionIndicator(ListView listView, int dropIndex)
+    private void ShowInsertionIndicator(ListViewBase listView, int dropIndex)
     {
         ClearInsertionIndicator();
 
@@ -1343,11 +1499,11 @@ public partial class LauncherItemsPage : Page
             return;
         }
 
-        bool isGrid = listView.ItemsPanelRoot is ItemsWrapGrid;
+        bool isGrid = IsGridItemsPanel(listView.ItemsPanelRoot);
 
         int targetIndex = dropIndex < listView.Items.Count ? dropIndex : listView.Items.Count - 1;
         if (targetIndex < 0) return;
-        if (listView.ContainerFromIndex(targetIndex) is not ListViewItem container) return;
+        if (listView.ContainerFromIndex(targetIndex) is not Control container) return;
 
         _lastIndicatorContainer = container;
         container.BorderBrush = AccentBrush;
@@ -2333,16 +2489,16 @@ public partial class LauncherItemsPage : Page
     /// Determines the item insertion index for a drop based on the cursor position
     /// relative to the ListView item containers.
     /// </summary>
-    private static int GetDropIndex(ListView listView, DragEventArgs e)
+    private static int GetDropIndex(ListViewBase listView, DragEventArgs e)
     {
         // Dispatch to grid hit-testing if the ListView uses ItemsWrapGrid
-        if (listView.ItemsPanelRoot is ItemsWrapGrid)
+        if (IsGridItemsPanel(listView.ItemsPanelRoot))
             return GetDropIndexGrid(listView, e);
 
         var position = e.GetPosition(listView);
         for (int i = 0; i < listView.Items.Count; i++)
         {
-            if (listView.ContainerFromIndex(i) is not ListViewItem container) continue;
+            if (listView.ContainerFromIndex(i) is not Control container) continue;
             var transform = container.TransformToVisual(listView);
             var point = transform.TransformPoint(new global::Windows.Foundation.Point(0, 0));
             if (position.Y < point.Y + container.ActualHeight / 2)
@@ -2355,7 +2511,7 @@ public partial class LauncherItemsPage : Page
     /// 2D drop index for icon mode grids (ItemsWrapGrid layout).
     /// Finds the closest item boundary based on both X and Y coordinates.
     /// </summary>
-    private static int GetDropIndexGrid(ListView listView, DragEventArgs e)
+    private static int GetDropIndexGrid(ListViewBase listView, DragEventArgs e)
     {
         var position = e.GetPosition(listView);
         int count = listView.Items.Count;
@@ -2367,7 +2523,7 @@ public partial class LauncherItemsPage : Page
 
         for (int i = 0; i < count; i++)
         {
-            if (listView.ContainerFromIndex(i) is not ListViewItem container) continue;
+            if (listView.ContainerFromIndex(i) is not Control container) continue;
             var transform = container.TransformToVisual(listView);
             var pt = transform.TransformPoint(new global::Windows.Foundation.Point(0, 0));
 

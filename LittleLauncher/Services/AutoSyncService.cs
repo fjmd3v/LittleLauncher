@@ -14,6 +14,7 @@ public static class AutoSyncService
     private static System.Threading.Timer? _periodicTimer;
     private static System.Threading.Timer? _debounceTimer;
     private static bool _running;
+    private static bool _hasPendingLocalItemChanges;
 
     /// <summary>
     /// When true, the next call to <see cref="NotifyItemsChanged"/> is ignored.
@@ -71,6 +72,12 @@ public static class AutoSyncService
     /// </summary>
     public static void NotifyItemsChanged()
     {
+        if (SettingsManager.Current.SftpAutoSync
+            && !string.IsNullOrWhiteSpace(SettingsManager.Current.SftpHost))
+        {
+            _hasPendingLocalItemChanges = true;
+        }
+
         if (SuppressNextChange)
         {
             SuppressNextChange = false;
@@ -107,6 +114,11 @@ public static class AutoSyncService
         _ = UploadAndPushSharedAsync("settings close flush");
     }
 
+    internal static void ClearPendingLocalItemChanges()
+    {
+        _hasPendingLocalItemChanges = false;
+    }
+
     /// <summary>
     /// Run the startup sync: download launchers from the server, then sync shared launchers.
     /// </summary>
@@ -121,6 +133,7 @@ public static class AutoSyncService
             var (success, message) = await SftpSyncService.DownloadLaunchersAsync(isStartupSync: true);
             if (success)
             {
+                ClearPendingLocalItemChanges();
                 Logger.Info("Auto-sync startup: downloaded launchers");
                 Windows.FlyoutWindow.InvalidateItems();
                 MainWindow.Current?.RefreshTrayIcons();
@@ -146,7 +159,10 @@ public static class AutoSyncService
         {
             var (success, message) = await SftpSyncService.UploadLaunchersAsync();
             if (success)
+            {
+                ClearPendingLocalItemChanges();
                 Logger.Info($"Auto-sync ({trigger}): uploaded launchers");
+            }
             else
                 Logger.Warn($"Auto-sync ({trigger}) skipped: {message}");
         }
@@ -178,11 +194,19 @@ public static class AutoSyncService
             || string.IsNullOrWhiteSpace(SettingsManager.Current.SftpHost))
             return;
 
+        if (_hasPendingLocalItemChanges)
+        {
+            Logger.Info($"Auto-sync ({trigger}) download skipped: pending local item changes have not been uploaded yet");
+            await SyncSharedLaunchersSilentAsync(trigger);
+            return;
+        }
+
         try
         {
             var (success, message) = await SftpSyncService.DownloadLaunchersAsync();
             if (success)
             {
+                ClearPendingLocalItemChanges();
                 Logger.Info($"Auto-sync ({trigger}): downloaded launchers");
                 App.MainDispatcherQueue.TryEnqueue(() =>
                 {

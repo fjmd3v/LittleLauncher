@@ -1,6 +1,7 @@
 <Page x:Class="LittleLauncher.Pages.LauncherItemsPage"
       xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
       xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:controls="using:LittleLauncher.Controls"
       xmlns:pages="using:LittleLauncher.Pages"
       xmlns:win="using:LittleLauncher.Windows">
 
@@ -189,6 +190,7 @@
             <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
                     BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
                     BorderThickness="1" CornerRadius="4" Margin="0,2"
+                HorizontalAlignment="Center"
                     Loaded="ItemCard_Loaded"
                     PointerEntered="ItemCard_PointerEntered" PointerExited="ItemCard_PointerExited">
                 <StackPanel Tag="GroupRoot" Loaded="GroupRoot_Loaded">
@@ -219,6 +221,7 @@
                     <StackPanel Tag="GroupChildren" Margin="4,0,4,0">
                         <ListView ItemsSource="{Binding Children}"
                                   Tag="{Binding}"
+                                  HorizontalAlignment="Center"
                                   CanDragItems="True" AllowDrop="True"
                                   SelectionMode="None" MinHeight="36"
                                   Loaded="IconModeWrapList_Loaded"
@@ -261,10 +264,15 @@
             LauncherItemTemplate="{StaticResource IconModeItemTemplate}"
             GroupItemTemplate="{StaticResource IconModeGroupTemplate}"/>
 
+        <ItemsPanelTemplate x:Key="TopLevelIconModeItemsPanel">
+            <controls:PackedIconPanel MaximumRowsOrColumns="3" ItemWidth="84" ItemHeight="86"/>
+        </ItemsPanelTemplate>
+
         <!-- Synthetic group template: just wrapping children, no card/header chrome -->
         <DataTemplate x:Key="IconModeSyntheticGroupTemplate">
             <ListView ItemsSource="{Binding Children}"
                       Tag="{Binding}"
+                      HorizontalAlignment="Center"
                       CanDragItems="True" AllowDrop="True"
                       SelectionMode="None" MinHeight="36"
                       Loaded="IconModeWrapList_Loaded"

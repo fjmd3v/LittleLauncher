@@ -15,7 +15,7 @@ App.xaml  →  MainWindow (invisible, owns tray icon)
 
 ## LauncherItemsPage multi-column layout and drag-and-drop
 
-The Launcher Items settings page renders items in a multi-column `Grid` (`ColumnsPanel`). The flat `Items` collection is split at `IsColumnBreak` sentinel items into per-column `ObservableCollection<LauncherItem>` lists by `BuildColumnLists()`. Each column gets its own `ListView` (fixed 280px wide), with column headers showing "Column N" and a remove button (except column 1). Users add columns via "Add Column" and remove them via the column header delete button (which merges items into the previous column). Each item/group card has a `...` context menu button (visible on hover via Opacity toggling) with Move up/down, Move to…, Edit, and Remove actions.
+The Launcher Items settings page renders items in a multi-column `Grid` (`ColumnsPanel`). The flat `Items` collection is split at `IsColumnBreak` sentinel items into per-column `ObservableCollection<LauncherItem>` lists by `BuildColumnLists()`. List-mode columns render as fixed-width `ListView`s (280px), while icon-mode columns render as `GridView`s whose top-level items are arranged by the custom `PackedIconPanel`. That panel packs groups into shared rows by requested icon span while keeping the row height based on the actual measured group card. Column headers show "Column N" and a remove button (except column 1). Users add columns via "Add Column" and remove them via the column header delete button (which merges items into the previous column). Each item/group card has a `...` context menu button (visible on hover via Opacity toggling) with Move up/down, Move to…, Edit, and Remove actions.
 
 Drag-and-drop supports cross-column and cross-group moves: items can be dragged between columns, between columns and group child lists, and out of groups via a drop zone. All ListViews use `CanDragItems="True"` with custom `DragOver`/`Drop` handlers — WinUI 3's `CanReorderItems` is intentionally avoided because it takes full internal control of drag events and cannot support cross-collection moves. After drag operations, `SyncColumnsToFlatList()` writes the column lists back to the flat collection. See `.github/instructions/drag-drop.instructions.md` for implementation details.
 
@@ -53,7 +53,7 @@ By default, launching the app opens the Settings window. Silent mode (tray icon 
 | Manual add/edit | `DoFetch()` in add/edit dialog (calls `FaviconService` directly for the single item) |
 | PWA add | PWA combo selection handler (`FaviconService.GetBestPwaIconAsync()`: prefers a real site/manifest icon, rejects off-origin login redirects, then falls back to the installed shell icon) |
 
-After bulk icon changes, callers invoke `FlyoutWindow.InvalidateItems()` so the flyout rebuilds its containers on the next toggle.
+After bulk icon changes, callers invoke `FlyoutWindow.InvalidateItems()` so the flyout rebuilds its containers on the next toggle and the open `LauncherItemsPage` refreshes if it is showing the affected launcher.
 
 ## SFTP sync
 
@@ -76,6 +76,7 @@ The sharing UI lives in `LaunchersPage.xaml.cs`: "Share" button on unshared laun
 - Downloads launchers on startup, then syncs shared launchers.
 - Debounced upload (3 s) when items change.
 - Periodic download on a configurable interval, followed by shared launcher sync.
+- Automatic downloads are skipped while local launcher item edits are pending upload, so a periodic pull cannot overwrite newer flyout/editor changes before the debounced upload completes.
 
 Supports both private-key (`PrivateKeyFile`) and password-based authentication.
 
@@ -100,7 +101,7 @@ For pinned taskbar launches, `MainWindow` now tries to resolve the actual taskba
 **Direct reordering**: FlyoutWindow now mirrors the editor's custom drag-drop approach instead of WinUI `CanReorderItems`. Each column is rendered as a drag-enabled `ListView`, and grouped sections render nested child `ListView`s. In icon mode, consecutive ungrouped items are wrapped into synthetic groups for display so icon tiles can still be reordered in a wrapping `ItemsWrapGrid`. Drops use custom insertion indicators (horizontal for list sections, vertical for icon grids), then sync the per-column view back into the launcher's flat `Items` collection, save settings, notify auto-sync, refresh the Launcher Items editor if it is open, and invalidate tray/flyout surfaces.
 
 **Multi-column & multi-view layout**: The flyout renders items into a horizontal `ColumnsPanel` (a `StackPanel`). Each `LauncherItem` with `IsColumnBreak = true` starts a new column. The display mode is controlled by `Launcher.ViewMode`:
-- **Icon view** (ViewMode = 0, default): Each column is a `ListView` of grouped sections. Real groups render a heading plus a nested icon-grid child `ListView`, while consecutive ungrouped items are wrapped into synthetic groups so they render in the same wrapping grid surface. `Launcher.IconModeIconsPerRow` controls the maximum icons shown across each row (default 3, configurable from 1 to 12), the flyout shrinks each column to the widest row actually present so sparse layouts do not keep extra horizontal whitespace, and dragging near the flyout's left or right edge snaps the layout wider or narrower by whole icon columns without opening settings.
+- **Icon view** (ViewMode = 0, default): Each column is a `GridView` of grouped sections whose top-level layout is handled by the custom `PackedIconPanel`. Real groups render a heading plus a nested icon-grid child `ListView`, while consecutive ungrouped items are wrapped into synthetic groups so they render in the same wrapping grid surface. `Launcher.IconModeIconsPerRow` controls the maximum icons shown across each row (default 3, configurable from 1 to 12). Top-level groups use their visible child count as a width span so narrower groups can share a row beside wider groups, while the packed panel keeps row heights based on the measured group cards instead of fixed slot heights. Dragging near the flyout's left or right edge snaps the layout wider or narrower by whole icon columns without opening settings.
 - **List view** (ViewMode = 1): Each column is a drag-enabled `ListView` of top-level items and groups. Real groups render a heading plus a nested child `ListView`, so items can be dragged within groups, out to the top level, or between columns while keeping the flyout visuals close to the editor.
 
 `RebuildColumnsPanel()` rebuilds all columns (icon grid or ListView) from scratch whenever items change. Window width scales per column: 175 px for list view, or a dynamic icon-mode width derived from the configured icons-per-row value.

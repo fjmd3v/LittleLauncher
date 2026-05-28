@@ -1,5 +1,6 @@
 using LittleLauncher.Classes;
 using LittleLauncher.Classes.Settings;
+using LittleLauncher.Controls;
 using LittleLauncher.Models;
 using LittleLauncher.Pages;
 using LittleLauncher.Services;
@@ -20,6 +21,7 @@ using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Imaging;
 using Microsoft.UI.Windowing;
 using Microsoft.UI;
+using Microsoft.UI.Xaml.Markup;
 using global::Windows.Storage.Pickers;
 using WinRT.Interop;
 using static LittleLauncher.Classes.NativeMethods;
@@ -64,8 +66,8 @@ public partial class FlyoutWindow : Window
     private MainWindow? _owner;
     private LauncherItem? _dragItem;
     private ObservableCollection<LauncherItem>? _dragSourceCollection;
-    private ListViewItem? _lastIndicatorContainer;
-    private ListView? _lastIndicatorListView;
+    private Control? _lastIndicatorContainer;
+    private ListViewBase? _lastIndicatorListView;
     private Brush? _lastIndicatorContainerBorderBrush;
     private Thickness _lastIndicatorContainerBorderThickness;
     private Thickness _lastIndicatorContainerPadding;
@@ -86,6 +88,7 @@ public partial class FlyoutWindow : Window
     private int _resizeStartIconsPerRow;
     private List<ObservableCollection<LauncherItem>> _columnLists = [];
     private readonly HashSet<ListView> _loadedIconChildLists = [];
+    private readonly HashSet<FrameworkElement> _loadedIconGroupRoots = [];
     private readonly HashSet<LauncherItem> _syntheticGroups = [];
     private readonly Launcher _launcher;  // The launcher this window displays
     private FlyoutEntranceEdge _lastEntranceEdge = FlyoutEntranceEdge.Bottom;
@@ -539,31 +542,33 @@ public partial class FlyoutWindow : Window
         }
     }
 
-    private ListView CreateColumnListView(int columnIndex)
+    private ListViewBase CreateColumnListView(int columnIndex)
     {
         bool isIconMode = IsIconMode;
         string templateSelectorKey = isIconMode
             ? (IsSmallIconMode ? "SmallIconItemTemplateSelector" : "IconItemTemplateSelector")
             : "ListItemTemplateSelector";
 
-        var lv = new ListView
-        {
-            Width = isIconMode ? GetIconColumnWidth(_columnLists[columnIndex]) : ColumnWidth,
-            Padding = new Thickness(0),
-            IsItemClickEnabled = true,
-            SelectionMode = ListViewSelectionMode.None,
-            IsTabStop = false,
-            CanDragItems = true,
-            AllowDrop = true,
-            Tag = columnIndex,
-            TabNavigation = Microsoft.UI.Xaml.Input.KeyboardNavigationMode.Once,
-            ItemTemplateSelector = (DataTemplateSelector)RootGrid.Resources[templateSelectorKey],
-            ItemContainerTransitions = new TransitionCollection(),
-            Transitions = new TransitionCollection(),
-        };
+        ListViewBase lv = isIconMode ? new GridView() : new ListView();
+        lv.Width = isIconMode ? GetIconColumnWidth(_columnLists[columnIndex]) : ColumnWidth;
+        lv.Padding = new Thickness(0);
+        lv.IsItemClickEnabled = true;
+        lv.SelectionMode = ListViewSelectionMode.None;
+        lv.IsTabStop = false;
+        lv.CanDragItems = true;
+        lv.AllowDrop = true;
+        lv.Tag = columnIndex;
+        lv.TabNavigation = Microsoft.UI.Xaml.Input.KeyboardNavigationMode.Once;
+        lv.ItemTemplateSelector = (DataTemplateSelector)RootGrid.Resources[templateSelectorKey];
+        lv.ItemContainerTransitions = new TransitionCollection();
+        lv.Transitions = new TransitionCollection();
 
         if (isIconMode)
-            lv.ItemContainerStyle = (Style)RootGrid.Resources["GroupItemContainerStyle"];
+        {
+            lv.ItemContainerStyle = (Style)RootGrid.Resources["IconGroupGridItemContainerStyle"];
+            lv.ItemsPanel = (ItemsPanelTemplate)RootGrid.Resources["IconColumnItemsPanel"];
+            lv.ContainerContentChanging += IconColumn_ContainerContentChanging;
+        }
         else
             lv.ItemContainerStyleSelector = (StyleSelector)RootGrid.Resources["ItemContainerStyleSelector"];
 
@@ -580,7 +585,7 @@ public partial class FlyoutWindow : Window
         return lv;
     }
 
-    private static void DisableListViewTransitions(ListView listView)
+    private static void DisableListViewTransitions(ListViewBase listView)
     {
         listView.ItemContainerTransitions = new TransitionCollection();
         listView.Transitions = new TransitionCollection();
@@ -591,8 +596,29 @@ public partial class FlyoutWindow : Window
 
     private void ColumnListView_Loaded(object sender, RoutedEventArgs e)
     {
-        if (sender is ListView listView)
+        if (sender is ListViewBase listView)
+        {
             DisableListViewTransitions(listView);
+            if (IsIconMode)
+                ApplyTopLevelIconSpans(listView);
+        }
+    }
+
+    private void IconColumn_ContainerContentChanging(ListViewBase sender, ContainerContentChangingEventArgs args)
+    {
+        if (args.InRecycleQueue || args.Item is not LauncherItem item || args.ItemContainer is not Control container)
+            return;
+
+        if (sender.ItemsPanelRoot is PackedIconPanel wrapGrid)
+        {
+            wrapGrid.MaximumRowsOrColumns = GetIconModeIconsPerRow();
+            wrapGrid.ItemWidth = GetActiveIconCellWidth();
+            wrapGrid.ItemHeight = GetActiveIconCellHeight();
+            wrapGrid.InvalidateMeasure();
+        }
+
+        VariableSizedWrapGrid.SetColumnSpan(container, GetTopLevelIconSpan(item));
+        VariableSizedWrapGrid.SetRowSpan(container, GetTopLevelIconRowSpan(item));
     }
 
     private void InitializeResizeGrips()
@@ -643,6 +669,74 @@ public partial class FlyoutWindow : Window
     private int GetIconColumnWidth(ObservableCollection<LauncherItem> items)
     {
         return GetIconColumnWidth();
+    }
+
+    private int GetIconGroupContentWidth(LauncherItem group)
+    {
+        int maxIconsPerRow = GetIconModeIconsPerRow();
+        int visibleIcons = Math.Clamp(group.Children.Count, 1, maxIconsPerRow);
+        return visibleIcons * GetActiveIconCellWidth();
+    }
+
+    private ItemsPanelTemplate CreateIconGroupItemsPanel()
+    {
+        string xaml = "<ItemsPanelTemplate xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation'>" +
+                      $"<ItemsWrapGrid Orientation='Horizontal' MaximumRowsOrColumns='{GetIconModeIconsPerRow()}'/>" +
+                      "</ItemsPanelTemplate>";
+        return (ItemsPanelTemplate)XamlReader.Load(xaml);
+    }
+
+    private int GetTopLevelIconSpan(LauncherItem item)
+    {
+        if (!item.IsGroup)
+            return 1;
+
+        return Math.Clamp(item.Children.Count, 1, GetIconModeIconsPerRow());
+    }
+
+    private int GetTopLevelIconRowSpan(LauncherItem item)
+    {
+        if (!item.IsGroup)
+            return 1;
+
+        int childRows = Math.Max(1, (item.Children.Count + GetIconModeIconsPerRow() - 1) / GetIconModeIconsPerRow());
+        return _syntheticGroups.Contains(item) ? childRows : childRows + 1;
+    }
+
+    private static bool IsGridItemsPanel(Panel? panel) =>
+        panel is ItemsWrapGrid or PackedIconPanel;
+
+    private void ApplyTopLevelIconSpans(ListViewBase listView)
+    {
+        if (listView.ItemsPanelRoot is not PackedIconPanel wrapGrid)
+            return;
+
+        wrapGrid.MaximumRowsOrColumns = GetIconModeIconsPerRow();
+        wrapGrid.ItemWidth = GetActiveIconCellWidth();
+        wrapGrid.ItemHeight = GetActiveIconCellHeight();
+
+        listView.UpdateLayout();
+
+        for (int index = 0; index < listView.Items.Count; index++)
+        {
+            if (listView.Items[index] is not LauncherItem item || listView.ContainerFromIndex(index) is not Control container)
+                continue;
+
+            int columnSpan = GetTopLevelIconSpan(item);
+            int rowSpan = GetTopLevelIconRowSpan(item);
+            VariableSizedWrapGrid.SetColumnSpan(container, columnSpan);
+            VariableSizedWrapGrid.SetRowSpan(container, rowSpan);
+
+            if (index < wrapGrid.Children.Count && wrapGrid.Children[index] is UIElement panelChild)
+            {
+                VariableSizedWrapGrid.SetColumnSpan(panelChild, columnSpan);
+                VariableSizedWrapGrid.SetRowSpan(panelChild, rowSpan);
+            }
+        }
+
+        wrapGrid.InvalidateMeasure();
+        wrapGrid.InvalidateArrange();
+        listView.UpdateLayout();
     }
 
     private int GetFlyoutWidth()
@@ -901,6 +995,8 @@ public partial class FlyoutWindow : Window
     {
         if (launcherId != null)
         {
+            LauncherItemsPage.NotifyItemsChanged(launcherId);
+
             if (_instances.TryGetValue(launcherId, out var fw))
             {
                 fw._lastItemsHash = -1;
@@ -913,6 +1009,8 @@ public partial class FlyoutWindow : Window
         }
         else
         {
+            LauncherItemsPage.NotifyItemsChanged();
+
             foreach (var fw in _instances.Values)
             {
                 fw._lastItemsHash = -1;
@@ -1083,12 +1181,15 @@ public partial class FlyoutWindow : Window
 
     private void UpdateFlyoutLayoutInPlace()
     {
-        foreach (var columnListView in ColumnsPanel.Children.OfType<ListView>())
+        foreach (var columnListView in ColumnsPanel.Children.OfType<ListViewBase>())
         {
             DisableListViewTransitions(columnListView);
 
             if (IsIconMode && columnListView.Tag is int columnIndex && columnIndex >= 0 && columnIndex < _columnLists.Count)
+            {
                 columnListView.Width = GetIconColumnWidth(_columnLists[columnIndex]);
+                ApplyTopLevelIconSpans(columnListView);
+            }
         }
 
         if (!IsIconMode)
@@ -1101,12 +1202,11 @@ public partial class FlyoutWindow : Window
             if (childListView.ItemsPanelRoot is ItemsWrapGrid wrapGrid)
                 wrapGrid.MaximumRowsOrColumns = GetIconModeIconsPerRow();
 
-            if (childListView.Tag is LauncherItem group)
-            {
-                childListView.Width = GetIconModeIconsPerRow() * GetActiveIconCellWidth();
-                childListView.HorizontalAlignment = HorizontalAlignment.Center;
-            }
+            ApplyIconGroupChildListLayout(childListView);
         }
+
+        foreach (var groupRoot in _loadedIconGroupRoots.ToList())
+            ApplyIconGroupRootLayout(groupRoot);
     }
 
     private void ResizeWindowToCurrentContent(bool keepRightEdge)
@@ -1155,20 +1255,65 @@ public partial class FlyoutWindow : Window
         ScrollViewer.SetVerticalScrollBarVisibility(listView, ScrollBarVisibility.Disabled);
         ScrollViewer.SetHorizontalScrollBarVisibility(listView, ScrollBarVisibility.Disabled);
 
+        listView.ItemsPanel = CreateIconGroupItemsPanel();
+        listView.UpdateLayout();
+
         if (listView.ItemsPanelRoot is ItemsWrapGrid wrapGrid)
             wrapGrid.MaximumRowsOrColumns = GetIconModeIconsPerRow();
 
-        if (listView.Tag is LauncherItem group)
+        ApplyIconGroupChildListLayout(listView);
+
+        if (listView.Tag is LauncherItem group && _syntheticGroups.Contains(group))
         {
-            listView.Width = GetIconModeIconsPerRow() * GetActiveIconCellWidth();
-            listView.HorizontalAlignment = HorizontalAlignment.Center;
+            VariableSizedWrapGrid.SetColumnSpan(listView, GetTopLevelIconSpan(group));
+            VariableSizedWrapGrid.SetRowSpan(listView, GetTopLevelIconRowSpan(group));
         }
+    }
+
+    private void IconGroupRoot_Loaded(object sender, RoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement element || element.DataContext is not LauncherItem group)
+            return;
+
+        _loadedIconGroupRoots.Add(element);
+        element.Unloaded -= IconGroupRoot_Unloaded;
+        element.Unloaded += IconGroupRoot_Unloaded;
+
+        ApplyIconGroupRootLayout(element);
+    }
+
+    private void ApplyIconGroupRootLayout(FrameworkElement element)
+    {
+        if (element.DataContext is not LauncherItem group)
+            return;
+
+        element.ClearValue(FrameworkElement.WidthProperty);
+        element.MaxWidth = GetIconGroupContentWidth(group);
+        element.HorizontalAlignment = HorizontalAlignment.Center;
+        VariableSizedWrapGrid.SetColumnSpan(element, GetTopLevelIconSpan(group));
+        VariableSizedWrapGrid.SetRowSpan(element, GetTopLevelIconRowSpan(group));
+    }
+
+    private void ApplyIconGroupChildListLayout(ListView listView)
+    {
+        if (listView.Tag is not LauncherItem group)
+            return;
+
+        listView.Width = GetIconGroupContentWidth(group);
+        listView.MaxWidth = GetIconModeIconsPerRow() * GetActiveIconCellWidth();
+        listView.HorizontalAlignment = HorizontalAlignment.Center;
     }
 
     private void IconGroupChildList_Unloaded(object sender, RoutedEventArgs e)
     {
         if (sender is ListView listView)
             _loadedIconChildLists.Remove(listView);
+    }
+
+    private void IconGroupRoot_Unloaded(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement element)
+            _loadedIconGroupRoots.Remove(element);
     }
 
     private void ListGroupChildList_Loaded(object sender, RoutedEventArgs e)
@@ -1179,7 +1324,7 @@ public partial class FlyoutWindow : Window
 
     private void ColumnListView_DragItemsStarting(object sender, DragItemsStartingEventArgs e)
     {
-        if (sender is not ListView listView || listView.Tag is not int columnIndex)
+        if (sender is not ListViewBase listView || listView.Tag is not int columnIndex)
             return;
 
         if (e.Items.FirstOrDefault() is not LauncherItem item)
@@ -1198,7 +1343,7 @@ public partial class FlyoutWindow : Window
 
     private void ColumnListView_DragOver(object sender, DragEventArgs e)
     {
-        if (_dragItem == null || _dragSourceCollection == null || sender is not ListView listView)
+        if (_dragItem == null || _dragSourceCollection == null || sender is not ListViewBase listView)
             return;
 
         e.AcceptedOperation = global::Windows.ApplicationModel.DataTransfer.DataPackageOperation.Move;
@@ -1210,7 +1355,12 @@ public partial class FlyoutWindow : Window
         e.DragUIOverride.IsGlyphVisible = true;
 
         if (dropIndex < listView.Items.Count && listView.Items[dropIndex] is LauncherItem targetItem)
-            e.DragUIOverride.Caption = $"Move above {GetItemDisplayName(targetItem)}";
+        {
+            bool isGrid = IsGridItemsPanel(listView.ItemsPanelRoot);
+            e.DragUIOverride.Caption = isGrid
+                ? $"Move before {GetItemDisplayName(targetItem)}"
+                : $"Move above {GetItemDisplayName(targetItem)}";
+        }
         else
             e.DragUIOverride.Caption = "Move to end";
 
@@ -1225,7 +1375,7 @@ public partial class FlyoutWindow : Window
     private void ColumnListView_Drop(object sender, DragEventArgs e)
     {
         ClearInsertionIndicator();
-        if (_dragItem == null || _dragSourceCollection == null || sender is not ListView listView || listView.Tag is not int columnIndex)
+        if (_dragItem == null || _dragSourceCollection == null || sender is not ListViewBase listView || listView.Tag is not int columnIndex)
             return;
 
         var targetColumn = _columnLists[columnIndex];
@@ -1367,7 +1517,7 @@ public partial class FlyoutWindow : Window
         return string.IsNullOrWhiteSpace(item.Name) ? "item" : item.Name;
     }
 
-    private void ShowInsertionIndicator(ListView listView, int dropIndex)
+    private void ShowInsertionIndicator(ListViewBase listView, int dropIndex)
     {
         ClearInsertionIndicator();
 
@@ -1381,12 +1531,12 @@ public partial class FlyoutWindow : Window
             return;
         }
 
-        bool isGrid = listView.ItemsPanelRoot is ItemsWrapGrid;
+        bool isGrid = IsGridItemsPanel(listView.ItemsPanelRoot);
         int targetIndex = dropIndex < listView.Items.Count ? dropIndex : listView.Items.Count - 1;
         if (targetIndex < 0)
             return;
 
-        if (listView.ContainerFromIndex(targetIndex) is not ListViewItem container)
+        if (listView.ContainerFromIndex(targetIndex) is not Control container)
             return;
 
         _lastIndicatorContainer = container;
@@ -1462,15 +1612,15 @@ public partial class FlyoutWindow : Window
         }
     }
 
-    private static int GetDropIndex(ListView listView, DragEventArgs e)
+    private static int GetDropIndex(ListViewBase listView, DragEventArgs e)
     {
-        if (listView.ItemsPanelRoot is ItemsWrapGrid)
+        if (IsGridItemsPanel(listView.ItemsPanelRoot))
             return GetDropIndexGrid(listView, e);
 
         var position = e.GetPosition(listView);
         for (int index = 0; index < listView.Items.Count; index++)
         {
-            if (listView.ContainerFromIndex(index) is not ListViewItem container)
+            if (listView.ContainerFromIndex(index) is not Control container)
                 continue;
 
             var transform = container.TransformToVisual(listView);
@@ -1482,7 +1632,7 @@ public partial class FlyoutWindow : Window
         return listView.Items.Count;
     }
 
-    private static int GetDropIndexGrid(ListView listView, DragEventArgs e)
+    private static int GetDropIndexGrid(ListViewBase listView, DragEventArgs e)
     {
         var position = e.GetPosition(listView);
         int count = listView.Items.Count;
@@ -1494,7 +1644,7 @@ public partial class FlyoutWindow : Window
 
         for (int index = 0; index < count; index++)
         {
-            if (listView.ContainerFromIndex(index) is not ListViewItem container)
+            if (listView.ContainerFromIndex(index) is not Control container)
                 continue;
 
             var transform = container.TransformToVisual(listView);
@@ -1640,7 +1790,7 @@ public partial class FlyoutWindow : Window
 
     private void ItemsListControl_ContextRequested(UIElement sender, ContextRequestedEventArgs e)
     {
-        if (sender is ListView listView
+        if (sender is ListViewBase listView
             && e.TryGetPosition(listView, out var point)
             && TryGetContextMenuItem(listView, point, out var item))
         {
@@ -1649,11 +1799,11 @@ public partial class FlyoutWindow : Window
         }
     }
 
-    private static bool TryGetContextMenuItem(ListView listView, global::Windows.Foundation.Point point, out LauncherItem item)
+    private static bool TryGetContextMenuItem(ListViewBase listView, global::Windows.Foundation.Point point, out LauncherItem item)
     {
         for (int i = 0; i < listView.Items.Count; i++)
         {
-            if (listView.ContainerFromIndex(i) is not ListViewItem container) continue;
+            if (listView.ContainerFromIndex(i) is not Control container) continue;
             if (listView.Items[i] is not LauncherItem candidate || candidate.IsGroup || candidate.IsColumnBreak) continue;
 
             var origin = container.TransformToVisual(listView).TransformPoint(new global::Windows.Foundation.Point(0, 0));
@@ -2247,57 +2397,49 @@ public partial class FlyoutWindow : Window
 
     private double MeasureIconModeHeight()
     {
-        int iconsPerRow = GetIconModeIconsPerRow();
         int cellHeight = GetActiveIconCellHeight();
         double groupHeight = GetActiveGroupHeaderHeight();
 
-        var items = _launcher.Items;
-        if (items == null) return _lastMeasuredHeight;
-
         double maxColumnHeight = 0;
-        double currentColumnHeight = 0;
-        int pendingIcons = 0;
 
-        foreach (var item in items)
+        foreach (var column in _columnLists)
         {
-            if (item.IsColumnBreak)
+            double currentColumnHeight = 0;
+            int currentRowSpan = 0;
+            double currentRowHeight = 0;
+
+            void FlushRow()
             {
-                if (pendingIcons > 0)
-                {
-                    int rows = (pendingIcons + iconsPerRow - 1) / iconsPerRow;
-                    currentColumnHeight += rows * cellHeight;
-                    pendingIcons = 0;
-                }
-                maxColumnHeight = Math.Max(maxColumnHeight, currentColumnHeight);
-                currentColumnHeight = 0;
-                continue;
+                if (currentRowSpan == 0)
+                    return;
+
+                currentColumnHeight += currentRowHeight;
+                currentRowSpan = 0;
+                currentRowHeight = 0;
             }
 
-            if (item.IsGroup)
+            foreach (var item in column)
             {
-                if (pendingIcons > 0)
-                {
-                    int rows = (pendingIcons + iconsPerRow - 1) / iconsPerRow;
-                    currentColumnHeight += rows * cellHeight;
-                    pendingIcons = 0;
-                }
-                currentColumnHeight += groupHeight;
-                foreach (var _ in item.Children)
-                    pendingIcons++;
+                int span = GetTopLevelIconSpan(item);
+                int iconRows = Math.Max(1, (item.Children.Count + GetIconModeIconsPerRow() - 1) / GetIconModeIconsPerRow());
+                double itemHeight = item.IsGroup && !_syntheticGroups.Contains(item)
+                    ? groupHeight + (iconRows * cellHeight)
+                    : iconRows * cellHeight;
+
+                if (currentRowSpan > 0 && currentRowSpan + span > GetIconModeIconsPerRow())
+                    FlushRow();
+
+                currentRowSpan += span;
+                currentRowHeight = Math.Max(currentRowHeight, itemHeight);
+
+                if (currentRowSpan >= GetIconModeIconsPerRow())
+                    FlushRow();
             }
-            else
-            {
-                pendingIcons++;
-            }
+
+            FlushRow();
+            maxColumnHeight = Math.Max(maxColumnHeight, currentColumnHeight);
         }
 
-        if (pendingIcons > 0)
-        {
-            int rows = (pendingIcons + iconsPerRow - 1) / iconsPerRow;
-            currentColumnHeight += rows * cellHeight;
-        }
-
-        maxColumnHeight = Math.Max(maxColumnHeight, currentColumnHeight);
         double titleHeight = _launcher.ShowTitle ? LauncherTitleHeight : 0;
         double outerPadding = FlyoutOuterPadding * 2;
         double maxContentHeight = GetWorkAreaHeightDips() - 16;
