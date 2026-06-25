@@ -3,10 +3,12 @@ using LittleLauncher.Classes.Settings;
 using LittleLauncher.Controls;
 using LittleLauncher.Models;
 using LittleLauncher.Services;
+using LittleLauncher.ViewModels;
 using LittleLauncher.Windows;
 using Microsoft.Data.Sqlite;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Markup;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Imaging;
 using System.Collections.ObjectModel;
@@ -1565,96 +1567,179 @@ public partial class LauncherItemsPage : Page
         string appWindowBrowser = existingItem?.AppWindowBrowser ?? "";
         string appWindowBrowserProfile = existingItem?.AppWindowBrowserProfile ?? "";
 
-        // -- 1. Type selector --
-        var typeCombo = new ComboBox { Margin = new Thickness(0, 0, 0, 8), HorizontalAlignment = HorizontalAlignment.Stretch };
-        typeCombo.Items.Add(new ComboBoxItem { Content = "Application" });
-        typeCombo.Items.Add(new ComboBoxItem { Content = "Progressive Web App" });
-        typeCombo.Items.Add(new ComboBoxItem { Content = "Website" });
-        typeCombo.SelectedIndex = isEdit ? (existingItem!.IsPwa ? 1 : existingItem.IsWebsite ? 2 : 0) : 0;
-
-        // -- 2. URL / Path --
+        // -- 1. Shared dialog state --
         Microsoft.UI.Dispatching.DispatcherQueueTimer? debounceTimer = null;
         string lastFetchedPath = "";
         bool populating = false;
 
-        var pathLabel = Label("URL");
-        var pathBox = new TextBox
+        // Derived target state, kept in sync by SyncDerived(). The active tab decides the
+        // source: "list" = the app/PWA selection, "custom" = the typed path/link.
+        // (isWebsite / isPwa declared above.)
+        string effectiveTarget = existingItem?.Path ?? "";
+        string currentTab = "list";
+
+        // Declared early so the validation handlers can reference it before the form is built.
+        var validationHint = new TextBlock
         {
-            PlaceholderText = "https://example.com",
+            Foreground = new Microsoft.UI.Xaml.Media.SolidColorBrush(
+                global::Windows.UI.Color.FromArgb(255, 255, 69, 0)),
+            FontSize = 12,
+            TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(0, 8, 0, 0)
+        };
+
+        // The dialog is created up front so validation handlers can toggle its primary
+        // button safely; its Content is assigned once the form is built below.
+        var dialog = new ContentDialog
+        {
+            XamlRoot = this.XamlRoot,
+            Title = isEdit ? "Edit Item" : "Add Item",
+            PrimaryButtonText = isEdit ? "Save" : "Add",
+            CloseButtonText = "Cancel",
+            DefaultButton = ContentDialogButton.Primary
+        };
+
+        // -- 2. Unified app + PWA picker (search + icon list) --
+        var searchBox = new AutoSuggestBox
+        {
+            QueryIcon = new SymbolIcon(Symbol.Find),
+            PlaceholderText = "Loading apps\u2026",
             Margin = new Thickness(0, 0, 0, 8),
             HorizontalAlignment = HorizontalAlignment.Stretch
         };
-
-        // App-mode: ComboBox with installed apps + Browse
-        var appPathCombo = new ComboBox
+        var appList = new ListView
         {
-            IsEditable = false,
+            SelectionMode = ListViewSelectionMode.Single,
+            Height = 260,
+            Margin = new Thickness(0, 0, 0, 8),
+            ItemTemplate = BuildAppItemTemplate()
+        };
+        ScrollViewer.SetVerticalScrollBarVisibility(appList, ScrollBarVisibility.Auto);
+
+        // Custom path/link inputs (live in the "Open a file or link instead" pane).
+        var pathBox = new TextBox
+        {
+            PlaceholderText = @"C:\path\to\app.exe  or  https://example.com",
             Margin = new Thickness(0, 0, 0, 0),
-            DisplayMemberPath = "DisplayName",
             HorizontalAlignment = HorizontalAlignment.Stretch
         };
-        bool appCatalogLoaded = false;
-        void EnsureAppCatalogLoaded()
-        {
-            if (appCatalogLoaded) return;
-            appPathCombo.Items.Clear();
-            foreach (var app in GetInstalledApplications())
-                appPathCombo.Items.Add(app);
-            appPathCombo.Items.Add(new InstalledApp("Browse\u2026", "__browse__"));
-            appCatalogLoaded = true;
-        }
-
         var browseButton = new Button
         {
             Content = "Browse",
             Padding = new Thickness(8, 4, 8, 4),
             FontSize = 12,
-            VerticalAlignment = VerticalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Bottom,
             Margin = new Thickness(4, 0, 0, 0)
         };
-        var appPathRow = new Grid
-        {
-            Margin = new Thickness(0, 0, 0, 8),
-            HorizontalAlignment = HorizontalAlignment.Stretch,
-            ColumnSpacing = 4
-        };
-        appPathRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        appPathRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        Grid.SetColumn(appPathCombo, 0);
-        Grid.SetColumn(browseButton, 1);
-        appPathRow.Children.Add(appPathCombo);
-        appPathRow.Children.Add(browseButton);
+        var allEntries = new List<AppPickerEntry>();
+        AppPickerEntry? pickedEntry = null;
+        bool catalogLoaded = false;
+        bool pendingEditSelect = false;
 
-        // PWA-mode: ComboBox with installed PWAs
-        var pwaLabel = Label("Installed PWA");
-        var pwaCombo = new ComboBox
+        // Enumerating apps (Start Menu + registry + shell:AppsFolder) and PWAs is
+        // expensive and apartment-threaded, so build the catalog on a background STA thread.
+        static List<AppPickerEntry> BuildCatalog()
         {
-            IsEditable = false,
-            Margin = new Thickness(0, 0, 0, 0),
-            DisplayMemberPath = "DisplayName",
-            HorizontalAlignment = HorizontalAlignment.Stretch
-        };
-        var noPwasHint = new TextBlock
-        {
-            Text = "No installed PWAs were detected in your browsers.",
-            FontSize = 12,
-            Opacity = 0.6,
-            TextWrapping = TextWrapping.Wrap,
-            Margin = new Thickness(0, 0, 0, 8),
-            Visibility = Visibility.Collapsed
-        };
-        bool pwaCatalogLoaded = false;
-        void EnsurePwaCatalogLoaded()
-        {
-            if (pwaCatalogLoaded) return;
-            pwaCombo.Items.Clear();
-            var pwas = GetInstalledPwas();
-            foreach (var pwa in pwas)
-                pwaCombo.Items.Add(pwa);
-            noPwasHint.Visibility = pwas.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
-            pwaCombo.Visibility = pwas.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
-            pwaCatalogLoaded = true;
+            var list = new List<AppPickerEntry>();
+            foreach (var app in GetInstalledApplications())
+                list.Add(new AppPickerEntry(app.DisplayName, app.ExePath, false, app.ExePath));
+            foreach (var pwa in GetInstalledPwas())
+                list.Add(new AppPickerEntry(pwa.DisplayName, pwa.Aumid, true, $@"shell:AppsFolder\{pwa.Aumid}"));
+            return list.OrderBy(e => e.Name, StringComparer.OrdinalIgnoreCase).ToList();
         }
+
+        void FilterApps(string? query)
+        {
+            IEnumerable<AppPickerEntry> items = allEntries;
+            if (!string.IsNullOrWhiteSpace(query))
+                items = items.Where(a => a.Name.Contains(query.Trim(), StringComparison.OrdinalIgnoreCase));
+            var shown = items.ToList();
+            populating = true;
+            appList.ItemsSource = shown;
+            if (pickedEntry != null && shown.Contains(pickedEntry))
+                appList.SelectedItem = pickedEntry;
+            populating = false;
+        }
+
+        async Task EnsureCatalogLoadedAsync()
+        {
+            if (catalogLoaded) return;
+            catalogLoaded = true;
+            allEntries = await AppPickerService.RunStaAsync(BuildCatalog) ?? new List<AppPickerEntry>();
+            searchBox.PlaceholderText = "Search apps and web apps\u2026";
+            FilterApps(searchBox.Text);
+            AppPickerService.LoadIcons(allEntries, DispatcherQueue);
+            if (pendingEditSelect)
+            {
+                pendingEditSelect = false;
+                PreselectEditEntry();
+            }
+        }
+
+        // -- Target resolution: a list selection wins; otherwise the typed path/link. --
+        static bool LooksLikeFilePath(string p) =>
+            p.StartsWith("shell:", StringComparison.OrdinalIgnoreCase) ||
+            (p.Length >= 2 && p[1] == ':') ||
+            p.StartsWith(@"\\") ||
+            p.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) ||
+            p.EndsWith(".lnk", StringComparison.OrdinalIgnoreCase) ||
+            p.EndsWith(".bat", StringComparison.OrdinalIgnoreCase) ||
+            p.EndsWith(".cmd", StringComparison.OrdinalIgnoreCase);
+
+        static bool LooksLikeWebUrl(string p)
+        {
+            if (string.IsNullOrWhiteSpace(p)) return false;
+            if (p.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
+                p.StartsWith("https://", StringComparison.OrdinalIgnoreCase)) return true;
+            if (LooksLikeFilePath(p)) return false;
+            return p.Contains('.');
+        }
+
+        (string target, bool isPwa, bool isWebsite) ResolveTarget()
+        {
+            if (currentTab == "custom")
+            {
+                var t = pathBox.Text.Trim();
+                return (t, false, LooksLikeWebUrl(t));
+            }
+            if (appList.SelectedItem is AppPickerEntry e)
+                return (e.LaunchPath, e.IsPwa, false);
+            return ("", false, false);
+        }
+
+        void PreselectEditEntry()
+        {
+            var match = allEntries.FirstOrDefault(e =>
+                e.IsPwa == existingItem!.IsPwa &&
+                string.Equals(e.LaunchPath, existingItem.Path, StringComparison.OrdinalIgnoreCase));
+            if (match != null)
+            {
+                pickedEntry = match;
+                populating = true;
+                if (appList.ItemsSource is IEnumerable<AppPickerEntry> shown && shown.Contains(match))
+                    appList.SelectedItem = match;
+                populating = false;
+                SyncDerived();
+                ValidateForm();
+            }
+            else if (!existingItem!.IsWebsite)
+            {
+                // Not in the catalog (e.g. a hand-browsed exe) \u2014 show it on the File/link tab.
+                populating = true;
+                pathBox.Text = existingItem.Path;
+                populating = false;
+                ShowTabPanel("custom");
+            }
+        }
+
+        static DataTemplate BuildAppItemTemplate() => (DataTemplate)XamlReader.Load(
+            "<DataTemplate xmlns=\"http://schemas.microsoft.com/winfx/2006/xaml/presentation\" " +
+            "xmlns:x=\"http://schemas.microsoft.com/winfx/2006/xaml\">" +
+            "<Grid ColumnSpacing=\"12\" Padding=\"0,4\">" +
+            "<Grid.ColumnDefinitions><ColumnDefinition Width=\"Auto\"/><ColumnDefinition Width=\"*\"/></Grid.ColumnDefinitions>" +
+            "<Image Grid.Column=\"0\" Source=\"{Binding Icon}\" Width=\"24\" Height=\"24\"/>" +
+            "<TextBlock Grid.Column=\"1\" Text=\"{Binding Name}\" VerticalAlignment=\"Center\" TextTrimming=\"CharacterEllipsis\"/>" +
+            "</Grid></DataTemplate>");
 
         // -- 3. Arguments (Application only) --
         var argsLabel = Label("Arguments");
@@ -2029,67 +2114,46 @@ public partial class LauncherItemsPage : Page
         );
         iconRow.Children.Add(chooseIconButton);
 
-        // -- Type toggle logic --
-        void UpdateTypeUI()
+        // Declared here (after nameBox / appWindowToggle exist) so they can read them.
+        void SyncDerived()
         {
-            bool wasWebsite = isWebsite;
-            bool wasPwa = isPwa;
-            isWebsite = typeCombo.SelectedIndex == 2;
-            isPwa = typeCombo.SelectedIndex == 1;
-            if (!isWebsite && !isPwa)
-            {
-                // Registry + app scanning is expensive; only load on-demand.
-                EnsureAppCatalogLoaded();
-            }
-            if (isPwa)
-                EnsurePwaCatalogLoaded();
-
-            pathLabel.Text = isWebsite ? "URL" : "Application";
-            pathBox.PlaceholderText = isWebsite ? "https://example.com" : @"e.g. notepad.exe or C:\Program Files\...";
-            pathLabel.Visibility = isPwa ? Visibility.Collapsed : Visibility.Visible;
-            pathBox.Visibility = isWebsite ? Visibility.Visible : Visibility.Collapsed;
-            appPathRow.Visibility = !isWebsite && !isPwa ? Visibility.Visible : Visibility.Collapsed;
-            pwaLabel.Visibility = isPwa ? Visibility.Visible : Visibility.Collapsed;
-            pwaCombo.Visibility = isPwa && pwaCombo.Items.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
-            noPwasHint.Visibility = isPwa && pwaCombo.Items.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
-            argsLabel.Visibility = !isWebsite && !isPwa ? Visibility.Visible : Visibility.Collapsed;
-            argsBox.Visibility = !isWebsite && !isPwa ? Visibility.Visible : Visibility.Collapsed;
-            appWindowToggle.Visibility = isWebsite ? Visibility.Visible : Visibility.Collapsed;
-            refreshButton.Visibility = isWebsite ? Visibility.Visible : Visibility.Collapsed;
+            var (t, pwa, web) = ResolveTarget();
+            effectiveTarget = t;
+            isPwa = pwa;
+            isWebsite = web;
+            appWindowToggle.Visibility = web ? Visibility.Visible : Visibility.Collapsed;
             UpdateAppWindowOptionsVisibility();
-
-            bool typeChanged = wasWebsite != isWebsite || wasPwa != isPwa;
-            if (typeChanged && !populating)
-            {
-                populating = true;
-                pathBox.Text = "";
-                appPathCombo.SelectedIndex = -1;
-                pwaCombo.SelectedIndex = -1;
-                argsBox.Text = "";
-                nameBox.Text = "";
-                fetchedIconPath = "";
-                customGlyph = null;
-                iconPreview.Source = null;
-                iconPreview.Visibility = Visibility.Collapsed;
-                iconGlyphPreview.Visibility = Visibility.Collapsed;
-                iconEmojiPreview.Visibility = Visibility.Collapsed;
-                iconStatus.Text = "Auto-detected";
-                lastFetchedPath = "";
-                appWindowToggle.IsOn = false;
-                browserCombo.SelectedIndex = 0;
-                appWindowBrowser = "";
-                profileCombo.SelectedIndex = 0;
-                appWindowBrowserProfile = "";
-                populating = false;
-            }
         }
 
-        typeCombo.SelectionChanged += (s, ev) => UpdateTypeUI();
+        async Task SelectEntry(AppPickerEntry e)
+        {
+            pickedEntry = e;
+            if (string.IsNullOrWhiteSpace(nameBox.Text)) nameBox.Text = e.Name;
+            SyncDerived();
+            lastFetchedPath = "";
+            await DoFetch(force: false);
+        }
 
-        // -- Auto-populate on path change (debounced) --
+        // -- Picker event wiring --
+        searchBox.TextChanged += (s, args) =>
+        {
+            if (args.Reason != AutoSuggestionBoxTextChangeReason.UserInput) return;
+            FilterApps(searchBox.Text);
+        };
+        appList.SelectionChanged += async (s, ev) =>
+        {
+            if (populating) return;
+            if (appList.SelectedItem is AppPickerEntry e)
+                await SelectEntry(e);
+            SyncDerived();
+            ValidateForm();
+        };
+
+        // -- Auto-populate icon / name for the current target (debounced) --
         async Task DoFetch(bool force)
         {
-            var path = pathBox.Text.Trim();
+            SyncDerived();
+            var path = effectiveTarget;
             if (string.IsNullOrEmpty(path)) return;
             if (!force && path == lastFetchedPath) return;
             lastFetchedPath = path;
@@ -2137,6 +2201,23 @@ public partial class LauncherItemsPage : Page
                 else
                 {
                     iconStatus.Text = "Could not fetch icon";
+                }
+            }
+            else if (isPwa)
+            {
+                // Prefer the PWA's own web icon/manifest asset; fall back to the shell image.
+                iconStatus.Text = "Fetching icon...";
+                refreshButton.IsEnabled = false;
+                var iconPath = await FaviconService.GetBestPwaIconAsync(path);
+                refreshButton.IsEnabled = true;
+                if (!string.IsNullOrEmpty(iconPath))
+                {
+                    fetchedIconPath = iconPath;
+                    RefreshIconPreview();
+                }
+                else
+                {
+                    iconStatus.Text = "No icon available";
                 }
             }
             else if (path.StartsWith(@"shell:AppsFolder\", StringComparison.OrdinalIgnoreCase))
@@ -2204,7 +2285,13 @@ public partial class LauncherItemsPage : Page
             debounceTimer.Start();
         }
 
-        pathBox.TextChanged += (s, ev) => ScheduleFetch();
+        pathBox.TextChanged += (s, ev) =>
+        {
+            if (populating) return;
+            SyncDerived();
+            ScheduleFetch();
+            ValidateForm();
+        };
         refreshButton.Click += async (s, ev) =>
         {
             debounceTimer?.Stop();
@@ -2212,7 +2299,7 @@ public partial class LauncherItemsPage : Page
             await DoFetch(force: true);
         };
 
-        // -- Wire up app-path combo events --
+        // -- Browse for an arbitrary file (custom path) --
         async Task BrowseForApp()
         {
             var picker = new FileOpenPicker();
@@ -2225,185 +2312,126 @@ public partial class LauncherItemsPage : Page
                 populating = true;
                 pathBox.Text = file.Path;
                 populating = false;
+                SyncDerived();
                 ScheduleFetch();
+                ValidateForm();
             }
         }
 
         browseButton.Click += async (s, ev) => await BrowseForApp();
-        bool appDropDownOpen = false;
-        appPathCombo.DropDownOpened += (s, ev) => appDropDownOpen = true;
-        appPathCombo.DropDownClosed += async (s, ev) =>
-        {
-            appDropDownOpen = false;
-            await CommitAppSelection();
-        };
-        appPathCombo.SelectionChanged += async (s, ev) =>
-        {
-            // Only commit immediately when dropdown is closed (programmatic / edit-mode population)
-            if (!appDropDownOpen)
-                await CommitAppSelection();
-        };
-        async Task CommitAppSelection()
-        {
-            if (populating) return;
-            if (appPathCombo.SelectedItem is InstalledApp app)
-            {
-                if (app.ExePath == "__browse__")
-                {
-                    appPathCombo.SelectedIndex = -1;
-                    await BrowseForApp();
-                    return;
-                }
-                populating = true;
-                pathBox.Text = app.ExePath;
-                populating = false;
-                ScheduleFetch();
-            }
-        }
-
-        // -- PWA combo selection --
-        bool pwaDropDownOpen = false;
-        pwaCombo.DropDownOpened += (s, ev) => pwaDropDownOpen = true;
-        pwaCombo.DropDownClosed += async (s, ev) =>
-        {
-            pwaDropDownOpen = false;
-            await CommitPwaSelection();
-        };
-        pwaCombo.SelectionChanged += async (s, ev) =>
-        {
-            if (!pwaDropDownOpen)
-                await CommitPwaSelection();
-        };
-        async Task CommitPwaSelection()
-        {
-            if (populating) return;
-            if (pwaCombo.SelectedItem is InstalledPwa pwa)
-            {
-                populating = true;
-                pathBox.Text = pwa.Aumid;
-                argsBox.Text = "";
-                populating = false;
-
-                // Prefer the PWA's own web icon/manifest asset; fall back to the shell image.
-                iconStatus.Text = "Fetching icon...";
-                refreshButton.IsEnabled = false;
-                var iconPath = await FaviconService.GetBestPwaIconAsync(pwa.Aumid);
-                refreshButton.IsEnabled = true;
-                if (!string.IsNullOrEmpty(iconPath))
-                {
-                    fetchedIconPath = iconPath;
-                    RefreshIconPreview();
-                }
-                else
-                {
-                    iconStatus.Text = "No icon available";
-                }
-            }
-        };
 
         // -- Populate for edit mode --
         if (isEdit)
         {
             populating = true;
-            pathBox.Text = existingItem!.Path;
-            if (existingItem.IsPwa)
-            {
-                EnsurePwaCatalogLoaded();
-                // Try to match by AUMID stored in Path
-                for (int i = 0; i < pwaCombo.Items.Count; i++)
-                {
-                    if (pwaCombo.Items[i] is InstalledPwa pwa &&
-                        string.Equals(pwa.Aumid, existingItem.Path, StringComparison.OrdinalIgnoreCase))
-                    {
-                        pwaCombo.SelectedIndex = i;
-                        break;
-                    }
-                }
-            }
-            else if (!existingItem.IsWebsite)
-            {
-                EnsureAppCatalogLoaded();
-                for (int i = 0; i < appPathCombo.Items.Count; i++)
-                {
-                    if (appPathCombo.Items[i] is InstalledApp ia &&
-                        string.Equals(ia.ExePath, existingItem.Path, StringComparison.OrdinalIgnoreCase))
-                    {
-                        appPathCombo.SelectedIndex = i;
-                        break;
-                    }
-                }
-            }
-            argsBox.Text = existingItem.Arguments;
+            argsBox.Text = existingItem!.Arguments;
             nameBox.Text = existingItem.Name;
+            if (existingItem.IsWebsite)
+            {
+                pathBox.Text = existingItem.Path;
+                currentTab = "custom";
+            }
+            else
+            {
+                // App or PWA: select the matching row once the catalog finishes loading.
+                pendingEditSelect = true;
+            }
             RefreshIconPreview();
             populating = false;
+            SyncDerived();
         }
 
+        // -- Tab 1: app/PWA picker --
+        var listPanel = new StackPanel();
+        listPanel.Children.Add(searchBox);
+        listPanel.Children.Add(appList);
+
+        // -- Tab 2: file / link --
+        var pathRow = new Grid
+        {
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            ColumnSpacing = 4,
+            Margin = new Thickness(0, 0, 0, 8)
+        };
+        pathRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        pathRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        Grid.SetColumn(pathBox, 0);
+        Grid.SetColumn(browseButton, 1);
+        pathRow.Children.Add(pathBox);
+        pathRow.Children.Add(browseButton);
+
+        var customPanel = new StackPanel { Visibility = Visibility.Collapsed };
+        customPanel.Children.Add(Label("Path or link"));
+        customPanel.Children.Add(pathRow);
+        customPanel.Children.Add(argsLabel);
+        customPanel.Children.Add(argsBox);
+        customPanel.Children.Add(appWindowToggle);
+        customPanel.Children.Add(appWindowOptionsPanel);
+
+        var tabContent = new Grid();
+        tabContent.Children.Add(listPanel);
+        tabContent.Children.Add(customPanel);
+
+        // -- Tab strip --
+        var listTab = new SelectorBarItem { Text = "Apps & web apps", Tag = "list" };
+        var customTab = new SelectorBarItem { Text = "File or link", Tag = "custom" };
+        var tabBar = new SelectorBar { Margin = new Thickness(0, 0, 0, 4) };
+        tabBar.Items.Add(listTab);
+        tabBar.Items.Add(customTab);
+
+        void ShowTabPanel(string tag)
+        {
+            currentTab = tag;
+            listPanel.Visibility = tag == "list" ? Visibility.Visible : Visibility.Collapsed;
+            customPanel.Visibility = tag == "custom" ? Visibility.Visible : Visibility.Collapsed;
+            var targetItem = tag == "custom" ? customTab : listTab;
+            if (!ReferenceEquals(tabBar.SelectedItem, targetItem))
+            {
+                populating = true;
+                tabBar.SelectedItem = targetItem;
+                populating = false;
+            }
+            SyncDerived();
+            ValidateForm();
+            ScheduleFetch();
+        }
+
+        tabBar.SelectionChanged += (s, ev) =>
+        {
+            if (populating) return;
+            ShowTabPanel((tabBar.SelectedItem as SelectorBarItem)?.Tag as string ?? "list");
+        };
+
         // -- Build form --
-        var form = new StackPanel { MinWidth = 400 };
-        form.Children.Add(Label("Type"));
-        form.Children.Add(typeCombo);
-        form.Children.Add(pwaLabel);
-        form.Children.Add(pwaCombo);
-        form.Children.Add(noPwasHint);
-        form.Children.Add(pathLabel);
-        form.Children.Add(pathBox);
-        form.Children.Add(appPathRow);
-        form.Children.Add(argsLabel);
-        form.Children.Add(argsBox);
-        form.Children.Add(appWindowToggle);
-        form.Children.Add(appWindowOptionsPanel);
+        var form = new StackPanel { MinWidth = 460 };
+        form.Children.Add(tabBar);
+        form.Children.Add(tabContent);
         form.Children.Add(Label("Name"));
         form.Children.Add(nameBox);
         form.Children.Add(Label("Icon"));
         form.Children.Add(iconRow);
-
-        var validationHint = new TextBlock
-        {
-            Foreground = new Microsoft.UI.Xaml.Media.SolidColorBrush(
-                global::Windows.UI.Color.FromArgb(255, 255, 69, 0)),
-            FontSize = 12,
-            TextWrapping = TextWrapping.Wrap,
-            Margin = new Thickness(0, 8, 0, 0)
-        };
-
         form.Children.Add(validationHint);
 
-        UpdateTypeUI();
+        ShowTabPanel(currentTab);
 
-        var dialog = new ContentDialog
+        dialog.Content = new ScrollViewer
         {
-            XamlRoot = this.XamlRoot,
-            Title = isEdit ? "Edit Item" : "Add Item",
             Content = form,
-            PrimaryButtonText = isEdit ? "Save" : "Add",
-            CloseButtonText = "Cancel",
-            DefaultButton = ContentDialogButton.Primary
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            VerticalScrollMode = ScrollMode.Auto,
+            HorizontalScrollMode = ScrollMode.Disabled,
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+            MaxHeight = 620
         };
 
         void ValidateForm()
         {
-            var missing = new List<string>();
-            if (isPwa)
+            var (t, _, _) = ResolveTarget();
+            // While editing, the existing app/PWA row auto-selects once the catalog
+            // finishes loading — treat that pending state as valid so Save isn't disabled.
+            if (string.IsNullOrWhiteSpace(t) && !(isEdit && pendingEditSelect))
             {
-                if (pwaCombo.SelectedIndex < 0)
-                    missing.Add("PWA selection");
-            }
-            else if (isWebsite)
-            {
-                if (string.IsNullOrWhiteSpace(pathBox.Text))
-                    missing.Add("URL");
-            }
-            else
-            {
-                // Application mode: accept either a combo selection or a typed path
-                bool hasAppSelection = appPathCombo.SelectedItem is InstalledApp sel && sel.ExePath != "__browse__";
-                if (!hasAppSelection && string.IsNullOrWhiteSpace(pathBox.Text))
-                    missing.Add("Path");
-            }
-            if (missing.Count > 0)
-            {
-                validationHint.Text = $"{string.Join(" and ", missing)} {(missing.Count == 1 ? "is" : "are")} required.";
+                validationHint.Text = "Choose an app or web app above, or enter a path or link.";
                 validationHint.Visibility = Visibility.Visible;
                 dialog.IsPrimaryButtonEnabled = false;
             }
@@ -2414,41 +2442,32 @@ public partial class LauncherItemsPage : Page
             }
         }
 
-        pathBox.TextChanged += (s, ev) => ValidateForm();
-        nameBox.TextChanged += (s, ev) => ValidateForm();
-        appPathCombo.SelectionChanged += (s, ev) => ValidateForm();
-        pwaCombo.SelectionChanged += (s, ev) => ValidateForm();
         ValidateForm();
+        _ = EnsureCatalogLoadedAsync();
 
         var result = await dialog.ShowAsync();
         debounceTimer?.Stop();
         if (result != ContentDialogResult.Primary) return;
 
-        var finalPath = pathBox.Text.Trim();
-        // If the path box is empty but the app combo has a selection, use that
-        if (string.IsNullOrEmpty(finalPath) && !isWebsite && !isPwa
-            && appPathCombo.SelectedItem is InstalledApp selectedApp && selectedApp.ExePath != "__browse__")
-        {
-            finalPath = selectedApp.ExePath;
-        }
+        SyncDerived();
+        var (finalPath, finalIsPwa, finalIsWebsite) = ResolveTarget();
+        finalPath = finalPath.Trim();
+        if (string.IsNullOrEmpty(finalPath)) return;
+
         var name = nameBox.Text.Trim();
         if (string.IsNullOrEmpty(name))
         {
-            if (!isWebsite && !isPwa && appPathCombo.SelectedItem is InstalledApp comboApp && comboApp.ExePath != "__browse__")
-                name = comboApp.DisplayName;
-            else if (isWebsite)
+            if (pickedEntry != null)
+                name = pickedEntry.Name;
+            else if (finalIsWebsite)
                 name = await FaviconService.FetchWebsiteTitleAsync(finalPath) ?? finalPath;
-            else if (isPwa && pwaCombo.SelectedItem is InstalledPwa selectedPwa)
-                name = selectedPwa.DisplayName;
-            else if (isPwa)
-                name = finalPath;
             else if (finalPath.StartsWith(@"shell:AppsFolder\", StringComparison.OrdinalIgnoreCase))
                 name = Path.GetFileNameWithoutExtension(finalPath);
             else
                 name = FaviconService.GetApplicationName(finalPath) ?? Path.GetFileNameWithoutExtension(finalPath);
         }
-        var args = argsBox.Text.Trim();
-        var glyph = customGlyph ?? (isWebsite || isPwa ? "\uE774" : "\uE8E5");
+        var args = finalIsPwa ? "" : argsBox.Text.Trim();
+        var glyph = customGlyph ?? (finalIsWebsite || finalIsPwa ? "\uE774" : "\uE8E5");
 
         if (isEdit)
         {
@@ -2458,19 +2477,19 @@ public partial class LauncherItemsPage : Page
             existingItem.IconGlyph = glyph;
             existingItem.IconPath = fetchedIconPath;
             existingItem.IconColor = customColor;
-            existingItem.IsWebsite = isWebsite;
-            existingItem.IsPwa = isPwa;
-            existingItem.OpenInAppWindow = isWebsite && openInAppWindow;
-            existingItem.AppWindowBrowser = isWebsite && openInAppWindow ? appWindowBrowser : "";
-            existingItem.AppWindowBrowserProfile = isWebsite && openInAppWindow ? appWindowBrowserProfile : "";
+            existingItem.IsWebsite = finalIsWebsite;
+            existingItem.IsPwa = finalIsPwa;
+            existingItem.OpenInAppWindow = finalIsWebsite && openInAppWindow;
+            existingItem.AppWindowBrowser = finalIsWebsite && openInAppWindow ? appWindowBrowser : "";
+            existingItem.AppWindowBrowserProfile = finalIsWebsite && openInAppWindow ? appWindowBrowserProfile : "";
         }
         else
         {
-            var newItem = new LauncherItem(name, finalPath, glyph, isWebsite, args, fetchedIconPath, isWebsite && openInAppWindow);
-            newItem.IsPwa = isPwa;
+            var newItem = new LauncherItem(name, finalPath, glyph, finalIsWebsite, args, fetchedIconPath, finalIsWebsite && openInAppWindow);
+            newItem.IsPwa = finalIsPwa;
             newItem.IconColor = customColor;
-            newItem.AppWindowBrowser = isWebsite && openInAppWindow ? appWindowBrowser : "";
-            newItem.AppWindowBrowserProfile = isWebsite && openInAppWindow ? appWindowBrowserProfile : "";
+            newItem.AppWindowBrowser = finalIsWebsite && openInAppWindow ? appWindowBrowser : "";
+            newItem.AppWindowBrowserProfile = finalIsWebsite && openInAppWindow ? appWindowBrowserProfile : "";
             var target = targetList ?? CurrentItems;
             target.Add(newItem);
         }

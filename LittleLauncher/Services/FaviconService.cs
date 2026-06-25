@@ -59,16 +59,16 @@ internal static partial class FaviconService
                 return localPath;
 
             // 1. Try PWA manifest icons / HTML link icons from the page (preferred)
-            byte[]? bytes = await TryFetchIconFromSiteAsync(url);
+            byte[]? bytes = RasterOrNull(await TryFetchIconFromSiteAsync(url));
 
             // 2. Try Google's favicon service (works well for public sites)
             if (allowGoogleFaviconFallback && (bytes == null || bytes.Length < 100))
-                bytes = await TryDownloadAsync(Http,
-                    $"https://www.google.com/s2/favicons?domain={Uri.EscapeDataString(host)}&sz=64");
+                bytes = RasterOrNull(await TryDownloadAsync(Http,
+                    $"https://www.google.com/s2/favicons?domain={Uri.EscapeDataString(host)}&sz=64"));
 
             // 3. Fall back to /favicon.ico directly
             if (bytes == null || bytes.Length < 100)
-                bytes = await TryDownloadAsync(TolerantHttp, $"{baseUrl}/favicon.ico");
+                bytes = RasterOrNull(await TryDownloadAsync(TolerantHttp, $"{baseUrl}/favicon.ico"));
 
             if (bytes == null || bytes.Length < 100)
                 return null;
@@ -82,6 +82,29 @@ internal static partial class FaviconService
             Logger.Warn(ex, $"Failed to fetch favicon for {url}");
             return null;
         }
+    }
+
+    /// <summary>Returns <paramref name="bytes"/> only if it's a raster image the app can render.</summary>
+    private static byte[]? RasterOrNull(byte[]? bytes) => IsRasterImage(bytes) ? bytes : null;
+
+    /// <summary>
+    /// True when the bytes start with a known raster image signature (PNG, JPEG, GIF, BMP,
+    /// ICO/CUR, WEBP). Rejects SVG and other vector/markup payloads, which WinUI's
+    /// <c>BitmapImage</c> cannot decode — saving one as <c>.png</c> yields a blank icon, so
+    /// callers should fall back (e.g. to the shell-extracted icon for PWAs).
+    /// </summary>
+    private static bool IsRasterImage(byte[]? b)
+    {
+        if (b == null || b.Length < 4) return false;
+        if (b[0] == 0x89 && b[1] == 0x50 && b[2] == 0x4E && b[3] == 0x47) return true;      // PNG
+        if (b[0] == 0xFF && b[1] == 0xD8 && b[2] == 0xFF) return true;                       // JPEG
+        if (b[0] == 0x47 && b[1] == 0x49 && b[2] == 0x46) return true;                       // GIF
+        if (b[0] == 0x42 && b[1] == 0x4D) return true;                                       // BMP
+        if (b[0] == 0x00 && b[1] == 0x00 && (b[2] == 0x01 || b[2] == 0x02) && b[3] == 0x00)  // ICO / CUR
+            return true;
+        if (b.Length >= 12 && b[0] == 0x52 && b[1] == 0x49 && b[2] == 0x46 && b[3] == 0x46   // "RIFF"
+            && b[8] == 0x57 && b[9] == 0x45 && b[10] == 0x42 && b[11] == 0x50) return true;  // "WEBP"
+        return false;
     }
 
     /// <summary>
@@ -493,9 +516,18 @@ internal static partial class FaviconService
             try
             {
                 var size = new NativeMethods.SIZE { cx = 64, cy = 64 };
-                hr = factory.GetImage(size, 0, out hBitmap);
-                if (hr != 0 || hBitmap == IntPtr.Zero)
+                // GetImage returns E_PENDING while the shell rasterizes the icon on a
+                // background thread (uncached PWA/Store tiles). The list picker requests
+                // 32px, so a warm 32px cache does NOT satisfy this 64px request — retry
+                // until it's ready, otherwise an uncached PWA gets no persisted icon.
+                const int E_PENDING = unchecked((int)0x8000000A);
+                for (int attempt = 0; ; attempt++)
+                {
+                    hr = factory.GetImage(size, 0, out hBitmap);
+                    if (hr == 0 && hBitmap != IntPtr.Zero) break;
+                    if (hr == E_PENDING && attempt < 15) { System.Threading.Thread.Sleep(40); continue; }
                     return null;
+                }
 
                 NativeMethods.GetObject(hBitmap,
                     Marshal.SizeOf<NativeMethods.BITMAP>(), out var bm);
@@ -613,12 +645,22 @@ internal static partial class FaviconService
         string? pwaUrl = TryGetPwaUrl(aumid);
         if (!string.IsNullOrEmpty(pwaUrl))
         {
-            string? webIcon = await FetchAndCacheCoreAsync(pwaUrl, allowGoogleFaviconFallback: false, preferCachedResult: false);
-            if (!string.IsNullOrEmpty(webIcon))
-                return webIcon;
+            try
+            {
+                string? webIcon = await FetchAndCacheCoreAsync(pwaUrl, allowGoogleFaviconFallback: false, preferCachedResult: false);
+                if (!string.IsNullOrEmpty(webIcon))
+                    return webIcon;
+            }
+            catch (Exception ex)
+            {
+                // A self-hosted PWA domain may be unreachable / refuse the request;
+                // never let that prevent the shell-icon fallback below.
+                Logger.Debug(ex, $"PWA web icon fetch failed for {pwaUrl}");
+            }
         }
 
-        return GetPwaIconFromShell(aumid);
+        // Off the UI thread: the shell extraction may sleep-retry on E_PENDING.
+        return await Task.Run(() => GetPwaIconFromShell(aumid));
     }
 
     // ── Batch icon pipeline ────────────────────────────────────────
