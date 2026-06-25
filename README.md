@@ -158,4 +158,6 @@ LauncherShortcut/              # Companion console exe for pin-to-taskbar helper
 
 ## License
 
-This project is licensed under the GPL-3.0 License. See [LICENSE](LICENSE) for details.
+Licensed under the [PolyForm Noncommercial License 1.0.0](LICENSE.md): free for any
+**personal and other noncommercial use**, including modifying and redistributing it.
+**Commercial use is not permitted.** Copyright © 2024-2026 Ryan Ewen.

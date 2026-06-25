@@ -1,5 +1,5 @@
 // Copyright © 2024-2026 The Little Launcher Authors
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
 
 using System.Runtime.InteropServices;
 using System.Text;
